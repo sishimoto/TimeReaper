@@ -1,4 +1,0 @@
-#6 add weekly.html to build, update build script checks
-
-- setup.py: weekly.html to DATA_FILES for py2app bundling
-- scripts/build.sh: add weekly.html to required file and template checks

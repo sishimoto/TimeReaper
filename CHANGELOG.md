@@ -5,6 +5,12 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/ja/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/lang/ja/).
 
+## [0.3.1] - 2026-03-03
+
+### Fixed
+- .app バンドルからの起動時（引数なし）にデフォルトで start コマンドを実行するよう修正
+  - DMG からインストールしたアプリがダブルクリックで起動しない問題を解消
+
 ## [0.3.0] - 2026-03-03
 
 ### Added

@@ -25,9 +25,23 @@ from ..database import insert_calendar_event
 
 logger = logging.getLogger(__name__)
 
-# CalHelper.app の場所（プロジェクトルートからの相対パス）
-_PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
-CALHELPER_APP = _PROJECT_ROOT / "CalHelper.app"
+# CalHelper.app の場所
+# .app バンドル内では Resources/ 直下に配置される
+_THIS_DIR = Path(__file__).resolve().parent
+_PROJECT_ROOT = _THIS_DIR.parent.parent
+
+def _find_calhelper() -> Path:
+    """CalHelper.app のパスを検出する（.app バンドル対応）"""
+    # 1. .app バンドル内: Contents/Resources/CalHelper.app
+    resources_dir = _THIS_DIR
+    while resources_dir != resources_dir.parent:
+        if resources_dir.name == "Resources" and (resources_dir / "CalHelper.app").exists():
+            return resources_dir / "CalHelper.app"
+        resources_dir = resources_dir.parent
+    # 2. 開発環境: プロジェクトルート/CalHelper.app
+    return _PROJECT_ROOT / "CalHelper.app"
+
+CALHELPER_APP = _find_calhelper()
 CALHELPER_OUTPUT = Path.home() / ".timetracker" / "cal_helper_output.json"
 
 # CalHelper の応答待ち最大時間（秒）

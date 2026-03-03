@@ -59,6 +59,9 @@ OPTIONS = {
         "timetracker.database",
         "timetracker.dashboard",
         "timetracker.menubar",
+        "urllib3.contrib.resolver",
+        "urllib3.contrib.resolver.system",
+        "urllib3.contrib.resolver._system",
     ],
     "excludes": [
         "tkinter",

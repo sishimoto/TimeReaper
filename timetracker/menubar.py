@@ -236,8 +236,11 @@ class TimeTrackerApp(rumps.App):
                     message="ダッシュボードからアップデートできます。",
                 )
 
-        from .updater import check_for_updates_async
-        check_for_updates_async(_on_update)
+        try:
+            from .updater import check_for_updates_async
+            check_for_updates_async(_on_update)
+        except Exception as e:
+            logger.warning(f"アップデートチェックをスキップ: {e}")
 
 
 def run_menubar_app():
