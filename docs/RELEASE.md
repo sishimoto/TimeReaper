@@ -75,12 +75,34 @@ git push origin main --tags
 
 ### 6. GitHub Release 作成
 
+**ビルドスクリプトで自動作成（推奨）:**
+
+```bash
+# 正式リリース（クリーンビルド + DMG + タグ + GitHub Release）
+./scripts/build.sh --release
+
+# テスト用プレリリース（GitHub で Pre-release フラグ付き）
+./scripts/build.sh --prerelease
+
+# プレリリース + ローカルインストール
+./scripts/build.sh --prerelease --install
+```
+
+**手動で作成する場合:**
+
 1. [GitHub Releases](https://github.com/sishimoto/TimeTracking/releases/new) にアクセス
 2. タグ: `v0.3.0` を選択
 3. タイトル: `v0.3.0: リリース名`
 4. 説明: CHANGELOG.md の該当セクションをコピー
 5. `dist/TimeTracker-v0.3.0.dmg` をアップロード
 6. 「Publish release」
+
+### テスト用プレリリースについて
+
+- タグ: `v0.3.1-rc` のように `-rc` サフィックス付き
+- GitHub Releases ページで「Pre-release」バッジが表示される
+- **Latest リリースには含まれない**（アップデート通知の対象外）
+- テスト完了後、正式版を `--release` で別途作成する
 
 ## 配布方法
 

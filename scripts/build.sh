@@ -35,18 +35,31 @@ echo ""
 DO_CLEAN=false
 DO_DMG=false
 DO_VERIFY_ONLY=false
+DO_RELEASE=false
+DO_PRERELEASE=false
+DO_INSTALL=false
 
 for arg in "$@"; do
     case $arg in
         --clean) DO_CLEAN=true ;;
         --dmg) DO_DMG=true ;;
         --verify) DO_VERIFY_ONLY=true ;;
+        --release) DO_RELEASE=true; DO_DMG=true; DO_CLEAN=true ;;
+        --prerelease) DO_PRERELEASE=true; DO_DMG=true; DO_CLEAN=true ;;
+        --install) DO_INSTALL=true ;;
         --help|-h)
-            echo "使い方: $0 [--clean] [--dmg] [--verify]"
+            echo "使い方: $0 [--clean] [--dmg] [--verify] [--release] [--prerelease] [--install]"
             echo ""
-            echo "  --clean   クリーンビルド（build/, dist/ を削除してからビルド）"
-            echo "  --dmg     DMG ファイルも作成"
-            echo "  --verify  既存ビルドの検証のみ"
+            echo "  --clean       クリーンビルド（build/, dist/ を削除してからビルド）"
+            echo "  --dmg         DMG ファイルも作成"
+            echo "  --verify      既存ビルドの検証のみ"
+            echo "  --release     正式リリース（クリーンビルド + DMG + タグ + GitHub Release）"
+            echo "  --prerelease  テスト用プレリリース（クリーンビルド + DMG + タグ + GitHub Pre-release）"
+            echo "  --install     ビルド後に /Applications にインストール"
+            echo ""
+            echo "例:"
+            echo "  $0 --prerelease --install  # プレリリース作成 + ローカルインストール"
+            echo "  $0 --release               # 正式リリース作成"
             exit 0
             ;;
     esac
@@ -207,7 +220,13 @@ fi
 if $DO_DMG; then
     echo ""
     echo "💿 DMG を作成中..."
-    DMG_NAME="TimeTracker-v${VERSION}.dmg"
+
+    # プレリリース時はサフィックス付き
+    if $DO_PRERELEASE; then
+        DMG_NAME="TimeTracker-v${VERSION}-rc.dmg"
+    else
+        DMG_NAME="TimeTracker-v${VERSION}.dmg"
+    fi
     DMG_PATH="dist/$DMG_NAME"
 
     # 既存 DMG を削除
@@ -239,9 +258,88 @@ if $DO_DMG; then
     fi
 fi
 
+# GitHub Release / Pre-release 作成
+if $DO_RELEASE || $DO_PRERELEASE; then
+    echo ""
+
+    # gh CLI チェック
+    if ! command -v gh &>/dev/null; then
+        log_error "gh CLI がインストールされていません: brew install gh"
+        exit 1
+    fi
+
+    if $DO_PRERELEASE; then
+        TAG="v${VERSION}-rc"
+        RELEASE_TITLE="v${VERSION}-rc: テスト用プレリリース"
+        RELEASE_FLAGS="--prerelease"
+        echo "📦 Pre-release を作成中..."
+    else
+        TAG="v${VERSION}"
+        RELEASE_TITLE="v${VERSION}"
+        RELEASE_FLAGS=""
+        echo "📦 正式リリースを作成中..."
+    fi
+
+    # 既存の同名リリースがあれば削除
+    if gh release view "$TAG" &>/dev/null; then
+        echo "  既存リリース $TAG を削除中..."
+        gh release delete "$TAG" --yes --cleanup-tag 2>/dev/null || true
+        git tag -d "$TAG" 2>/dev/null || true
+    fi
+
+    # コミット（未コミットの変更がある場合）
+    if ! git diff --quiet HEAD 2>/dev/null || ! git diff --cached --quiet HEAD 2>/dev/null; then
+        echo "  未コミットの変更をコミット中..."
+        git add -A
+        if $DO_PRERELEASE; then
+            git commit -m "prerelease: v${VERSION}-rc" --allow-empty
+        else
+            git commit -m "release: v${VERSION}" --allow-empty
+        fi
+    fi
+
+    # プッシュ
+    git push origin main 2>/dev/null || true
+
+    # タグ作成 & プッシュ
+    git tag -a "$TAG" -m "$RELEASE_TITLE"
+    git push origin "$TAG"
+
+    # GitHub Release 作成 + DMG アップロード
+    gh release create "$TAG" "$DMG_PATH" \
+        --title "$RELEASE_TITLE" \
+        --notes "ビルド日時: $(date '+%Y-%m-%d %H:%M')" \
+        $RELEASE_FLAGS
+
+    log_info "GitHub Release を作成しました: $TAG"
+    echo "  URL: https://github.com/sishimoto/TimeTracking/releases/tag/$TAG"
+fi
+
+# /Applications にインストール
+if $DO_INSTALL; then
+    echo ""
+    echo "📲 /Applications にインストール中..."
+
+    # 既存アプリを停止
+    pkill -f "TimeTracker.app" 2>/dev/null || true
+    lsof -ti:5555 | xargs kill -9 2>/dev/null || true
+    sleep 2
+
+    # 既存アプリを削除してコピー
+    rm -rf /Applications/TimeTracker.app
+    cp -R dist/TimeTracker.app /Applications/
+    log_info "/Applications/TimeTracker.app にインストールしました"
+
+    echo ""
+    echo "起動方法:"
+    echo "  open /Applications/TimeTracker.app"
+fi
+
 echo ""
 echo "🎉 完了！"
 echo ""
-echo "テスト実行:"
-echo "  open dist/TimeTracker.app"
-echo ""
+if ! $DO_INSTALL; then
+    echo "テスト実行:"
+    echo "  open dist/TimeTracker.app"
+    echo ""
+fi
