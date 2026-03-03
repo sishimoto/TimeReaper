@@ -87,7 +87,7 @@ if ! $SKIP_BUILD; then
     log_info "py2app: インストール済み"
 
     # 必須ファイルチェック
-    for f in main.py config.yaml timetracker/__init__.py timetracker/templates/dashboard.html timetracker/templates/summary.html; do
+    for f in main.py config.yaml timetracker/__init__.py timetracker/templates/dashboard.html timetracker/templates/summary.html timetracker/templates/weekly.html; do
         if [ ! -f "$f" ]; then
             log_error "必須ファイルが見つかりません: $f"
             exit 1
@@ -177,7 +177,7 @@ else
 fi
 
 # 4. テンプレートファイル
-for tmpl in dashboard.html summary.html; do
+for tmpl in dashboard.html summary.html weekly.html; do
     if find "$APP_PATH" -name "$tmpl" | grep -q .; then
         log_info "  テンプレート $tmpl: OK"
     else
