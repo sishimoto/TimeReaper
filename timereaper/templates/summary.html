@@ -511,6 +511,62 @@
 
         .empty-state .icon { font-size: 40px; margin-bottom: 10px; }
 
+        /* Hourly heatmap */
+        .heatmap-section {
+            margin-bottom: 20px;
+        }
+
+        .heatmap-section h2 {
+            font-size: 15px;
+            font-weight: 600;
+            margin-bottom: 8px;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+
+        .heatmap {
+            display: grid;
+            grid-template-columns: repeat(24, 1fr);
+            gap: 3px;
+        }
+
+        .heatmap-cell {
+            aspect-ratio: 1;
+            border-radius: 3px;
+            position: relative;
+            cursor: pointer;
+            min-height: 24px;
+        }
+
+        .heatmap-cell:hover::after {
+            content: attr(data-tooltip);
+            position: absolute;
+            bottom: 100%;
+            left: 50%;
+            transform: translateX(-50%);
+            background: var(--bg-primary);
+            border: 1px solid var(--border);
+            padding: 4px 8px;
+            border-radius: 4px;
+            font-size: 11px;
+            white-space: nowrap;
+            z-index: 10;
+        }
+
+        .heatmap-labels {
+            display: grid;
+            grid-template-columns: repeat(24, 1fr);
+            gap: 3px;
+            margin-top: 4px;
+        }
+
+        .heatmap-labels span {
+            text-align: center;
+            font-size: 10px;
+            color: var(--text-secondary);
+        }
+
         /* Table wrapper for bottom padding when bulk-bar is visible */
         .table-wrap { padding-bottom: 80px; }
 
@@ -600,6 +656,13 @@
                 <div class="label">ブロック数</div>
                 <div class="value" id="blockCount">--</div>
             </div>
+        </div>
+
+        <!-- Hourly Heatmap -->
+        <div class="heatmap-section">
+            <h2>📊 時間帯別アクティビティ</h2>
+            <div class="heatmap" id="heatmap"></div>
+            <div class="heatmap-labels" id="heatmapLabels"></div>
         </div>
 
         <!-- Toolbar -->
@@ -736,12 +799,18 @@
         // --- API ---
         async function loadBlocks() {
             try {
-                const res = await fetch(`/api/time-blocks/${currentDate}`);
-                const data = await res.json();
+                const [blocksRes, hourlyRes] = await Promise.all([
+                    fetch(`/api/time-blocks/${currentDate}`),
+                    fetch(`/api/hourly/${currentDate}`)
+                ]);
+                const data = await blocksRes.json();
                 blocks = data.blocks || [];
                 populateFilterSelects();
                 renderBlocks();
                 updateStats();
+
+                const hourlyData = await hourlyRes.json();
+                updateHeatmap(hourlyData.hourly);
             } catch (err) {
                 console.error('ブロック取得エラー:', err);
             }
@@ -1165,6 +1234,36 @@
             toast.textContent = msg;
             toast.classList.add('show');
             setTimeout(() => toast.classList.remove('show'), 3000);
+        }
+
+        // --- Heatmap ---
+        function updateHeatmap(hourly) {
+            const heatmap = document.getElementById('heatmap');
+            const labels = document.getElementById('heatmapLabels');
+
+            const hourTotals = new Array(24).fill(0);
+            if (hourly) {
+                hourly.forEach(h => {
+                    const hour = parseInt(h.hour);
+                    hourTotals[hour] += h.total_seconds || 0;
+                });
+            }
+
+            const maxVal = Math.max(...hourTotals, 1);
+
+            heatmap.innerHTML = hourTotals.map((seconds, hour) => {
+                const intensity = seconds / maxVal;
+                const color = intensity === 0 ?
+                    'rgba(88, 166, 255, 0.05)' :
+                    `rgba(88, 166, 255, ${0.15 + intensity * 0.85})`;
+                const tooltip = `${hour}時: ${formatDuration(seconds)}`;
+                return `<div class="heatmap-cell" style="background: ${color}"
+                             data-tooltip="${tooltip}"></div>`;
+            }).join('');
+
+            labels.innerHTML = Array.from({length: 24}, (_, i) =>
+                `<span>${i}</span>`
+            ).join('');
         }
 
         // --- Drag Selection ---
