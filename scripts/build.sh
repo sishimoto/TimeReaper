@@ -26,12 +26,17 @@ log_error() { echo -e "${RED}❌ $1${NC}"; }
 
 # バージョン取得
 VERSION=$(python3 -c "import re; content=open('timereaper/__init__.py').read(); print(re.search(r\"__version__\s*=\s*['\\\"]([^'\\\"]+)\", content).group(1))")
-echo ""
-echo "⏱  TimeReaper Build v${VERSION}"
-echo "================================"
-echo ""
 
-# オプション解析
+# --release / --prerelease 時はパッチバージョンを自動インクリメント
+bump_patch_version() {
+    local current="$1"
+    local major minor patch
+    IFS='.' read -r major minor patch <<< "$current"
+    patch=$((patch + 1))
+    echo "${major}.${minor}.${patch}"
+}
+
+# オプション解析（先に読む必要がある）
 DO_CLEAN=false
 DO_DMG=false
 DO_VERIFY_ONLY=false
@@ -78,6 +83,20 @@ if $DO_VERIFY_ONLY; then
 else
     SKIP_BUILD=false
 fi
+
+# --release / --prerelease 時にパッチバージョンを自動インクリメント
+if $DO_RELEASE || $DO_PRERELEASE; then
+    NEW_VERSION=$(bump_patch_version "$VERSION")
+    echo "🔢 バージョン自動インクリメント: v${VERSION} → v${NEW_VERSION}"
+    # __init__.py を更新
+    sed -i '' "s/__version__ = \"${VERSION}\"/__version__ = \"${NEW_VERSION}\"/" timereaper/__init__.py
+    VERSION="$NEW_VERSION"
+fi
+
+echo ""
+echo "⏱  TimeReaper Build v${VERSION}"
+echo "================================"
+echo ""
 
 if ! $SKIP_BUILD; then
 
