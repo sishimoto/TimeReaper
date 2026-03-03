@@ -1,0 +1,247 @@
+#!/bin/bash
+# TimeTracker ビルドスクリプト
+# macOS .app バンドルをビルドし、配布用の DMG を作成します。
+#
+# 使い方:
+#   ./scripts/build.sh           # .app ビルド
+#   ./scripts/build.sh --dmg     # .app + DMG 作成
+#   ./scripts/build.sh --clean   # クリーンビルド
+#   ./scripts/build.sh --verify  # ビルド後の検証のみ
+
+set -e
+
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+PROJECT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
+cd "$PROJECT_DIR"
+
+# カラー出力
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+NC='\033[0m' # No Color
+
+log_info()  { echo -e "${GREEN}✅ $1${NC}"; }
+log_warn()  { echo -e "${YELLOW}⚠️  $1${NC}"; }
+log_error() { echo -e "${RED}❌ $1${NC}"; }
+
+# バージョン取得
+VERSION=$(python3 -c "import re; content=open('timetracker/__init__.py').read(); print(re.search(r\"__version__\s*=\s*['\\\"]([^'\\\"]+)\", content).group(1))")
+echo ""
+echo "⏱  TimeTracker Build v${VERSION}"
+echo "================================"
+echo ""
+
+# オプション解析
+DO_CLEAN=false
+DO_DMG=false
+DO_VERIFY_ONLY=false
+
+for arg in "$@"; do
+    case $arg in
+        --clean) DO_CLEAN=true ;;
+        --dmg) DO_DMG=true ;;
+        --verify) DO_VERIFY_ONLY=true ;;
+        --help|-h)
+            echo "使い方: $0 [--clean] [--dmg] [--verify]"
+            echo ""
+            echo "  --clean   クリーンビルド（build/, dist/ を削除してからビルド）"
+            echo "  --dmg     DMG ファイルも作成"
+            echo "  --verify  既存ビルドの検証のみ"
+            exit 0
+            ;;
+    esac
+done
+
+# 検証のみモード
+if $DO_VERIFY_ONLY; then
+    echo "🔍 ビルド検証..."
+    APP_PATH="dist/TimeTracker.app"
+    if [ ! -d "$APP_PATH" ]; then
+        log_error "dist/TimeTracker.app が見つかりません。先にビルドしてください。"
+        exit 1
+    fi
+    # 検証セクションにジャンプ
+    SKIP_BUILD=true
+else
+    SKIP_BUILD=false
+fi
+
+if ! $SKIP_BUILD; then
+
+    # 前提条件チェック
+    echo "🔍 前提条件チェック..."
+
+    # Python チェック
+    if [ ! -f "venv/bin/python" ]; then
+        log_error "venv が見つかりません。先に setup.sh を実行してください。"
+        exit 1
+    fi
+    source venv/bin/activate
+    log_info "Python: $(python --version)"
+
+    # py2app チェック
+    if ! python -c "import py2app" 2>/dev/null; then
+        echo "📦 py2app をインストール中..."
+        pip install py2app
+    fi
+    log_info "py2app: インストール済み"
+
+    # 必須ファイルチェック
+    for f in main.py config.yaml timetracker/__init__.py timetracker/templates/dashboard.html timetracker/templates/summary.html; do
+        if [ ! -f "$f" ]; then
+            log_error "必須ファイルが見つかりません: $f"
+            exit 1
+        fi
+    done
+    log_info "必須ファイル: OK"
+
+    # アイコンチェック
+    if [ -f "assets/AppIcon.icns" ]; then
+        log_info "アプリアイコン: assets/AppIcon.icns"
+    else
+        log_warn "アイコンファイルがありません（デフォルトアイコンを使用）"
+        echo "   アイコンを生成するには: python scripts/generate_icon.py"
+    fi
+
+    # クリーンビルド
+    if $DO_CLEAN; then
+        echo ""
+        echo "🧹 クリーンビルド..."
+        rm -rf build dist
+        log_info "build/ と dist/ を削除しました"
+    fi
+
+    # ビルド実行
+    echo ""
+    echo "🔨 .app バンドルをビルド中..."
+    python setup.py py2app 2>&1 | tail -5
+
+    if [ ! -d "dist/TimeTracker.app" ]; then
+        log_error "ビルドに失敗しました"
+        exit 1
+    fi
+    log_info ".app バンドルをビルドしました: dist/TimeTracker.app"
+
+    # CalHelper.app を同梱
+    if [ -d "CalHelper.app" ] && [ -f "CalHelper.app/Contents/MacOS/CalHelper" ]; then
+        echo ""
+        echo "📅 CalHelper.app を同梱中..."
+        HELPERS_DIR="dist/TimeTracker.app/Contents/Resources/CalHelper.app"
+        cp -R CalHelper.app "$HELPERS_DIR"
+        log_info "CalHelper.app を同梱しました"
+    else
+        log_warn "CalHelper.app が見つかりません（Mac Calendar 連携は無効）"
+    fi
+
+    # config.yaml が Resources に含まれるか確認
+    if [ -f "dist/TimeTracker.app/Contents/Resources/config.yaml" ]; then
+        log_info "config.yaml: 同梱済み"
+    else
+        log_warn "config.yaml が .app に含まれていません。手動でコピーします..."
+        cp config.yaml "dist/TimeTracker.app/Contents/Resources/config.yaml"
+        log_info "config.yaml をコピーしました"
+    fi
+
+fi  # SKIP_BUILD
+
+# ===== ビルド検証 =====
+echo ""
+echo "🔍 ビルド検証..."
+APP_PATH="dist/TimeTracker.app"
+ERRORS=0
+
+# 1. .app バンドル構造
+echo "  - バンドル構造..."
+for check_dir in Contents Contents/MacOS Contents/Resources; do
+    if [ ! -d "$APP_PATH/$check_dir" ]; then
+        log_error "    $check_dir が見つかりません"
+        ERRORS=$((ERRORS + 1))
+    fi
+done
+
+# 2. 実行ファイル
+if [ -x "$APP_PATH/Contents/MacOS/TimeTracker" ]; then
+    log_info "  実行ファイル: OK"
+else
+    log_error "  実行ファイルが見つかりません"
+    ERRORS=$((ERRORS + 1))
+fi
+
+# 3. Info.plist のバージョン
+PLIST_VERSION=$(/usr/libexec/PlistBuddy -c "Print :CFBundleShortVersionString" "$APP_PATH/Contents/Info.plist" 2>/dev/null || echo "MISSING")
+if [ "$PLIST_VERSION" = "$VERSION" ]; then
+    log_info "  plist バージョン: $PLIST_VERSION"
+else
+    log_error "  plist バージョン不一致: $PLIST_VERSION (期待: $VERSION)"
+    ERRORS=$((ERRORS + 1))
+fi
+
+# 4. テンプレートファイル
+for tmpl in dashboard.html summary.html; do
+    if find "$APP_PATH" -name "$tmpl" | grep -q .; then
+        log_info "  テンプレート $tmpl: OK"
+    else
+        log_error "  テンプレート $tmpl が見つかりません"
+        ERRORS=$((ERRORS + 1))
+    fi
+done
+
+# 5. 署名チェック（ベストエフォート）
+if codesign -v "$APP_PATH" 2>/dev/null; then
+    log_info "  コード署名: OK"
+else
+    log_warn "  コード署名: なし（配布時は署名を推奨）"
+fi
+
+# 結果
+echo ""
+if [ $ERRORS -eq 0 ]; then
+    APP_SIZE=$(du -sh "$APP_PATH" | awk '{print $1}')
+    log_info "ビルド検証: 全チェック通過 (サイズ: $APP_SIZE)"
+else
+    log_error "ビルド検証: $ERRORS 件のエラー"
+    exit 1
+fi
+
+# DMG 作成
+if $DO_DMG; then
+    echo ""
+    echo "💿 DMG を作成中..."
+    DMG_NAME="TimeTracker-v${VERSION}.dmg"
+    DMG_PATH="dist/$DMG_NAME"
+
+    # 既存 DMG を削除
+    rm -f "$DMG_PATH"
+
+    # 一時ディレクトリに配置
+    DMG_STAGING="dist/dmg_staging"
+    rm -rf "$DMG_STAGING"
+    mkdir -p "$DMG_STAGING"
+    cp -R "$APP_PATH" "$DMG_STAGING/"
+
+    # Applications フォルダへのシンボリックリンク
+    ln -s /Applications "$DMG_STAGING/Applications"
+
+    # DMG 作成
+    hdiutil create -volname "TimeTracker v${VERSION}" \
+        -srcfolder "$DMG_STAGING" \
+        -ov -format UDZO \
+        "$DMG_PATH"
+
+    rm -rf "$DMG_STAGING"
+
+    if [ -f "$DMG_PATH" ]; then
+        DMG_SIZE=$(du -sh "$DMG_PATH" | awk '{print $1}')
+        log_info "DMG を作成しました: $DMG_PATH ($DMG_SIZE)"
+    else
+        log_error "DMG 作成に失敗しました"
+        exit 1
+    fi
+fi
+
+echo ""
+echo "🎉 完了！"
+echo ""
+echo "テスト実行:"
+echo "  open dist/TimeTracker.app"
+echo ""

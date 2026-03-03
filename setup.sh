@@ -1,11 +1,57 @@
 #!/bin/bash
 # TimeTracker セットアップスクリプト
 # macOS用の稼働時間管理アプリのセットアップを行います
+#
+# 使い方:
+#   ./setup.sh                 # フルセットアップ
+#   ./setup.sh --install-agent # LaunchAgent のインストールのみ
+#   ./setup.sh --update        # 依存パッケージの更新のみ
+#   ./setup.sh --help          # ヘルプ
 
 set -e
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 cd "$SCRIPT_DIR"
+
+# カラー出力
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+NC='\033[0m'
+
+log_info()  { echo -e "${GREEN}✅ $1${NC}"; }
+log_warn()  { echo -e "${YELLOW}⚠️  $1${NC}"; }
+log_error() { echo -e "${RED}❌ $1${NC}"; }
+log_step()  { echo -e "\n${GREEN}$1${NC}"; }
+
+# バージョン取得
+get_version() {
+    python3 -c "
+import re
+with open('timetracker/__init__.py') as f:
+    m = re.search(r\"__version__\s*=\s*['\\\"]([^'\\\"]+)\", f.read())
+    print(m.group(1) if m else '0.0.0')
+" 2>/dev/null || echo "0.0.0"
+}
+
+# ヘルプ
+show_help() {
+    echo "⏱  TimeTracker セットアップスクリプト"
+    echo ""
+    echo "使い方: $0 [オプション]"
+    echo ""
+    echo "オプション:"
+    echo "  (なし)           フルセットアップ（venv + 依存パッケージ + CalHelper + DB初期化）"
+    echo "  --install-agent  LaunchAgent のインストールのみ"
+    echo "  --update         依存パッケージの更新のみ（venv が既にある場合）"
+    echo "  --help, -h       このヘルプを表示"
+    exit 0
+}
+
+# --help
+if [ "$1" = "--help" ] || [ "$1" = "-h" ]; then
+    show_help
+fi
 
 # --install-agent オプション: LaunchAgent のインストールのみ実行
 if [ "$1" = "--install-agent" ]; then
@@ -14,8 +60,13 @@ if [ "$1" = "--install-agent" ]; then
     PLIST_DST="$HOME/Library/LaunchAgents/com.timetracker.app.plist"
     VENV_PYTHON="$SCRIPT_DIR/venv/bin/python"
 
+    if [ ! -f "$PLIST_SRC" ]; then
+        log_error "テンプレートファイルが見つかりません: $PLIST_SRC"
+        exit 1
+    fi
+
     if [ ! -f "$VENV_PYTHON" ]; then
-        echo "❌ venv が見つかりません。先に ./setup.sh を実行してください。"
+        log_error "venv が見つかりません。先に ./setup.sh を実行してください。"
         exit 1
     fi
 
@@ -31,7 +82,7 @@ if [ "$1" = "--install-agent" ]; then
     # LaunchAgent を登録
     launchctl load "$PLIST_DST"
 
-    echo "✅ LaunchAgent をインストールしました"
+    log_info "LaunchAgent をインストールしました"
     echo "   macOS ログイン時に自動起動します"
     echo ""
     echo "   停止: launchctl unload ~/Library/LaunchAgents/com.timetracker.app.plist"
@@ -40,51 +91,87 @@ if [ "$1" = "--install-agent" ]; then
     exit 0
 fi
 
+# --update オプション: 依存パッケージの更新のみ
+if [ "$1" = "--update" ]; then
+    if [ ! -d "venv" ]; then
+        log_error "venv が見つかりません。先に ./setup.sh を実行してください。"
+        exit 1
+    fi
+    source venv/bin/activate
+    log_step "📦 依存パッケージを更新中..."
+    pip install --upgrade pip
+    pip install -r requirements.txt --upgrade
+    log_info "依存パッケージを更新しました"
+    VERSION=$(get_version)
+    echo "   TimeTracker v${VERSION}"
+    exit 0
+fi
+
 echo "⏱ TimeTracker セットアップ"
 echo "=========================="
 echo ""
 
-# Python バージョンチェック
-PYTHON_CMD=""
-if command -v python3 &>/dev/null; then
-    PYTHON_CMD="python3"
-elif command -v python &>/dev/null; then
-    PYTHON_CMD="python"
-else
-    echo "❌ Pythonがインストールされていません"
-    echo "   brew install python3 でインストールしてください"
+# macOS チェック
+if [ "$(uname)" != "Darwin" ]; then
+    log_error "このアプリは macOS 専用です"
     exit 1
 fi
 
+# macOS バージョン確認
+MACOS_VERSION=$(sw_vers -productVersion)
+echo "   macOS: $MACOS_VERSION"
+
+# Python バージョンチェック
+PYTHON_CMD=""
+for cmd in python3.12 python3.11 python3; do
+    if command -v "$cmd" &>/dev/null; then
+        PYTHON_CMD="$cmd"
+        break
+    fi
+done
+if [ -z "$PYTHON_CMD" ]; then
+    if command -v python &>/dev/null; then
+        PYTHON_CMD="python"
+    else
+        log_error "Python 3 がインストールされていません"
+        echo "   brew install python3 でインストールしてください"
+        exit 1
+    fi
+fi
+
 PYTHON_VERSION=$($PYTHON_CMD --version 2>&1 | awk '{print $2}')
-echo "✅ Python: $PYTHON_VERSION"
+PYTHON_MAJOR=$(echo "$PYTHON_VERSION" | cut -d. -f1)
+PYTHON_MINOR=$(echo "$PYTHON_VERSION" | cut -d. -f2)
+
+if [ "$PYTHON_MAJOR" -lt 3 ] || ([ "$PYTHON_MAJOR" -eq 3 ] && [ "$PYTHON_MINOR" -lt 10 ]); then
+    log_error "Python 3.10 以上が必要です（現在: $PYTHON_VERSION）"
+    exit 1
+fi
+log_info "Python: $PYTHON_VERSION ($PYTHON_CMD)"
 
 # 仮想環境の作成
-if [ ! -d "venv" ]; then
-    echo ""
-    echo "📦 仮想環境を作成中..."
+if [ -d "venv" ]; then
+    log_info "仮想環境: 既存のものを使用"
+else
+    log_step "📦 仮想環境を作成中..."
     $PYTHON_CMD -m venv venv
-    echo "✅ 仮想環境を作成しました"
+    log_info "仮想環境を作成しました"
 fi
 
 # 仮想環境の有効化
 source venv/bin/activate
-echo "✅ 仮想環境を有効化しました"
+log_info "仮想環境を有効化しました"
 
 # 依存パッケージのインストール
-echo ""
-echo "📦 依存パッケージをインストール中..."
-pip install --upgrade pip
-pip install -r requirements.txt
-pip install pyyaml  # config用
-echo "✅ 依存パッケージをインストールしました"
+log_step "📦 依存パッケージをインストール中..."
+pip install --upgrade pip -q
+pip install -r requirements.txt -q
+log_info "依存パッケージをインストールしました"
 
 # データディレクトリの作成
 DATA_DIR="$HOME/.timetracker"
-if [ ! -d "$DATA_DIR" ]; then
-    mkdir -p "$DATA_DIR"
-    echo "✅ データディレクトリを作成しました: $DATA_DIR"
-fi
+mkdir -p "$DATA_DIR"
+log_info "データディレクトリ: $DATA_DIR"
 
 # macOS アクセシビリティ権限の案内
 echo ""
@@ -99,8 +186,7 @@ echo ""
 
 # CalHelper.app のビルド（Mac Calendar 連携用）
 if [ -f "CalHelper.swift" ]; then
-    echo ""
-    echo "📅 CalHelper.app をビルド中..."
+    log_step "📅 CalHelper.app をビルド中..."
     mkdir -p CalHelper.app/Contents/MacOS
     if [ ! -f "CalHelper.app/Contents/Info.plist" ]; then
         cat > CalHelper.app/Contents/Info.plist <<'PLIST'
@@ -124,14 +210,18 @@ if [ -f "CalHelper.swift" ]; then
 </plist>
 PLIST
     fi
-    swiftc -framework Cocoa -framework EventKit CalHelper.swift -o CalHelper.app/Contents/MacOS/CalHelper
-    echo "✅ CalHelper.app をビルドしました"
+    swiftc -framework Cocoa -framework EventKit CalHelper.swift -o CalHelper.app/Contents/MacOS/CalHelper 2>/dev/null
+    if [ $? -eq 0 ]; then
+        log_info "CalHelper.app をビルドしました"
+    else
+        log_warn "CalHelper.app のビルドに失敗しました（Xcode Command Line Tools が必要です）"
+    fi
 else
-    echo "⚠️  CalHelper.swift が見つかりません。Mac Calendar 連携は無効です。"
+    log_warn "CalHelper.swift が見つかりません。Mac Calendar 連携は無効です。"
 fi
 
 # データベースの初期化
-echo "🗃  データベースを初期化中..."
+log_step "🗃  データベースを初期化中..."
 $PYTHON_CMD -c "
 import sys
 sys.path.insert(0, '.')
@@ -140,11 +230,13 @@ from timetracker.database import init_db
 load_config()
 ensure_data_dir()
 init_db()
-print('✅ データベースを初期化しました')
-"
+" 2>/dev/null
+log_info "データベースを初期化しました"
+
+VERSION=$(get_version)
 
 echo ""
-echo "🎉 セットアップ完了！"
+echo "🎉 セットアップ完了！ (v${VERSION})"
 echo ""
 echo "起動方法:"
 echo ""
