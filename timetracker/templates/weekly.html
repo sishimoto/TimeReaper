@@ -356,7 +356,7 @@
 <body>
     <div class="container">
         <header>
-            <h1>週次レポート</h1>
+            <h1>週次レポート <span id="versionBadge" style="font-size: 11px; font-weight: 400; background: var(--bg-secondary); border: 1px solid var(--border); color: var(--text-secondary); padding: 2px 8px; border-radius: 10px; vertical-align: middle; margin-left: 6px;"></span></h1>
             <div class="nav-row">
                 <a href="/">← ダッシュボード</a>
                 <button onclick="changeWeek(-1)">← 前週</button>
@@ -759,6 +759,11 @@
             div.textContent = str || '';
             return div.innerHTML;
         }
+
+        // バージョン表示
+        fetch('/api/version').then(r => r.json()).then(d => {
+            document.getElementById('versionBadge').textContent = 'v' + d.version;
+        }).catch(() => {});
     </script>
 </body>
 </html>

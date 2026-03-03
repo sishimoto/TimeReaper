@@ -570,7 +570,7 @@
 <body>
     <div class="container">
         <header>
-            <h1>TimeTracker</h1>
+            <h1>TimeTracker <span id="versionBadge" style="font-size: 12px; font-weight: 400; background: var(--bg-secondary); border: 1px solid var(--border); color: var(--text-secondary); padding: 2px 8px; border-radius: 10px; vertical-align: middle; margin-left: 6px;"></span></h1>
             <div class="date-nav">
                 <div class="status-bar">
                     <div class="status-dot" id="statusDot"></div>
@@ -1335,6 +1335,11 @@
                 setTimeout(() => { btn.textContent = 'アップデート'; btn.disabled = false; }, 3000);
             }
         }
+
+        // バージョン表示
+        fetch('/api/version').then(r => r.json()).then(d => {
+            document.getElementById('versionBadge').textContent = 'v' + d.version;
+        }).catch(() => {});
 
         // ページ読み込み後にアップデートチェック（セッション中一度だけ）
         if (!sessionStorage.getItem('updateDismissed')) {

@@ -12,6 +12,7 @@ from datetime import datetime
 
 import rumps
 
+from . import __version__
 from .config import get_config
 from .database import init_db, insert_activity, get_daily_summary, get_current_meeting
 from .monitor import ActiveWindowMonitor, WindowInfo
@@ -51,6 +52,7 @@ class TimeTrackerApp(rumps.App):
             None,
             rumps.MenuItem("今日の作業時間", callback=None),
             None,
+            rumps.MenuItem(f"v{__version__}", callback=None),
             rumps.MenuItem("終了", callback=self.quit_app),
         ]
 
