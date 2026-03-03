@@ -4,6 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>TimeReaper - 稼働時間ダッシュボード</title>
+    <link rel="icon" type="image/png" href="/static/favicon.png">
     <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
     <style>
         :root {
@@ -64,9 +65,10 @@
             gap: 10px;
         }
 
-        header h1::before {
-            content: "⏱";
-            font-size: 28px;
+        header h1 .app-icon {
+            width: 28px;
+            height: 28px;
+            vertical-align: middle;
         }
 
         .nav-links {
@@ -465,7 +467,7 @@
             }
             .header-left { flex-wrap: wrap; }
             header h1 { font-size: 20px; }
-            header h1::before { font-size: 22px; }
+            header h1 .app-icon { width: 22px; height: 22px; }
             .nav-links { width: 100%; }
             .nav-links a { flex: 1; text-align: center; font-size: 12px; padding: 5px 6px; }
             .date-nav {
@@ -647,7 +649,7 @@
         <header>
             <div class="header-top">
                 <div class="header-left">
-                    <h1>TimeReaper <span id="versionBadge" style="font-size: 11px; font-weight: 400; background: var(--bg-secondary); border: 1px solid var(--border); color: var(--text-secondary); padding: 2px 8px; border-radius: 10px; vertical-align: middle; margin-left: 4px;"></span></h1>
+                    <h1><img src="/static/icon-128.png" alt="" class="app-icon">TimeReaper <span id="versionBadge" style="font-size: 11px; font-weight: 400; background: var(--bg-secondary); border: 1px solid var(--border); color: var(--text-secondary); padding: 2px 8px; border-radius: 10px; vertical-align: middle; margin-left: 4px;"></span></h1>
                     <div class="status-bar" style="margin-left: 8px;">
                         <div class="status-dot" id="statusDot"></div>
                         <span id="statusText">監視中</span>

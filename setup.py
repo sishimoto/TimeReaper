@@ -32,6 +32,10 @@ DATA_FILES = [
         "timereaper/templates/weekly.html",
         "timereaper/templates/settings.html",
     ]),
+    ("../Resources/timereaper/static", [
+        "timereaper/static/favicon.png",
+        "timereaper/static/icon-128.png",
+    ]),
 ]
 OPTIONS = {
     "argv_emulation": False,
