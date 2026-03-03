@@ -89,6 +89,51 @@
             font-size: 14px;
         }
 
+        /* Update Banner */
+        .update-banner {
+            display: none;
+            background: linear-gradient(135deg, #1a3a2a, #162d22);
+            border: 1px solid var(--accent-green);
+            border-radius: 8px;
+            padding: 12px 20px;
+            margin-bottom: 16px;
+            align-items: center;
+            gap: 12px;
+            font-size: 14px;
+        }
+        .update-banner.visible { display: flex; }
+        .update-banner .update-icon { font-size: 20px; }
+        .update-banner .update-text { flex: 1; }
+        .update-banner .update-text strong { color: var(--accent-green); }
+        .update-banner .update-actions { display: flex; gap: 8px; }
+        .update-banner .update-btn {
+            padding: 6px 14px;
+            border-radius: 6px;
+            border: none;
+            cursor: pointer;
+            font-size: 13px;
+            transition: opacity 0.2s;
+        }
+        .update-banner .update-btn:hover { opacity: 0.85; }
+        .update-btn-primary {
+            background: var(--accent-green);
+            color: #0d1117;
+            font-weight: 600;
+        }
+        .update-btn-secondary {
+            background: transparent;
+            border: 1px solid var(--border) !important;
+            color: var(--text-secondary);
+        }
+        .update-btn-close {
+            background: transparent;
+            border: none;
+            color: var(--text-secondary);
+            cursor: pointer;
+            font-size: 18px;
+            padding: 0 4px;
+        }
+
         /* Stats Cards */
         .stats-row {
             display: grid;
@@ -538,6 +583,20 @@
                 <button onclick="loadToday()">今日</button>
             </div>
         </header>
+
+        <!-- Update Banner -->
+        <div class="update-banner" id="updateBanner">
+            <span class="update-icon">🚀</span>
+            <div class="update-text">
+                新バージョン <strong id="updateVersion"></strong> が利用可能です
+                <span id="updateNotes" style="color: var(--text-secondary); margin-left: 8px;"></span>
+            </div>
+            <div class="update-actions">
+                <button class="update-btn update-btn-primary" onclick="performUpdate()">アップデート</button>
+                <a href="#" id="updateReleaseLink" target="_blank" class="update-btn update-btn-secondary" style="text-decoration:none;">詳細</a>
+                <button class="update-btn-close" onclick="dismissUpdate()">&times;</button>
+            </div>
+        </div>
 
         <!-- Stats Cards -->
         <div class="stats-row">
@@ -1221,6 +1280,64 @@
                 'Xcode': '🔨', 'IntelliJ IDEA': '🔨',
             };
             return emojis[appName] || '📱';
+        }
+
+        // --- アップデートチェック ---
+        async function checkForUpdates() {
+            try {
+                const res = await fetch('/api/check-update');
+                if (!res.ok) return;
+                const data = await res.json();
+                if (data.is_update_available) {
+                    document.getElementById('updateVersion').textContent = 'v' + data.latest_version;
+                    document.getElementById('updateReleaseLink').href = data.release_url || '#';
+                    const notesEl = document.getElementById('updateNotes');
+                    if (data.release_notes) {
+                        const firstLine = data.release_notes.split('\n')[0].substring(0, 80);
+                        notesEl.textContent = '— ' + firstLine;
+                    }
+                    document.getElementById('updateBanner').classList.add('visible');
+                }
+            } catch (e) {
+                // ネットワークエラーは無視（オフライン時など）
+            }
+        }
+
+        function dismissUpdate() {
+            document.getElementById('updateBanner').classList.remove('visible');
+            // セッション中は再表示しない
+            sessionStorage.setItem('updateDismissed', '1');
+        }
+
+        async function performUpdate() {
+            const btn = event.target;
+            btn.textContent = '更新中...';
+            btn.disabled = true;
+            try {
+                const res = await fetch('/api/update', { method: 'POST' });
+                const data = await res.json();
+                if (data.success) {
+                    document.getElementById('updateBanner').innerHTML =
+                        '<span class="update-icon">✅</span>' +
+                        '<div class="update-text"><strong>' + data.message + '</strong>' +
+                        ' — アプリを再起動してください</div>' +
+                        '<button class="update-btn-close" onclick="dismissUpdate()">&times;</button>';
+                } else {
+                    btn.textContent = '失敗';
+                    btn.style.background = 'var(--accent-red)';
+                    alert('アップデート失敗: ' + data.message + '\n\n' + (data.details || ''));
+                    setTimeout(() => { btn.textContent = 'アップデート'; btn.disabled = false; btn.style.background = ''; }, 3000);
+                }
+            } catch (e) {
+                btn.textContent = 'エラー';
+                alert('アップデートに失敗しました: ' + e.message);
+                setTimeout(() => { btn.textContent = 'アップデート'; btn.disabled = false; }, 3000);
+            }
+        }
+
+        // ページ読み込み後にアップデートチェック（セッション中一度だけ）
+        if (!sessionStorage.getItem('updateDismissed')) {
+            setTimeout(checkForUpdates, 3000);  // 3秒後に非同期チェック
         }
     </script>
 </body>

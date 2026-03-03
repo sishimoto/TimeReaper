@@ -216,6 +216,38 @@ def create_app():
         else:
             return jsonify({"ok": False, "message": f"'{value}' already exists in {category}"})
 
+    # --- アップデート API ---
+    @app.route("/api/check-update")
+    def api_check_update():
+        """最新バージョンを確認する"""
+        from .updater import check_for_updates
+        info = check_for_updates()
+        if info is None:
+            return jsonify({"error": "アップデート情報を取得できませんでした"}), 503
+        return jsonify({
+            "current_version": info.current_version,
+            "latest_version": info.latest_version,
+            "is_update_available": info.is_update_available,
+            "release_url": info.release_url,
+            "release_notes": info.release_notes,
+            "download_url": info.download_url,
+            "published_at": info.published_at,
+        })
+
+    @app.route("/api/update", methods=["POST"])
+    def api_perform_update():
+        """git pull でアップデートを実行する"""
+        from .updater import perform_git_update
+        result = perform_git_update()
+        status_code = 200 if result["success"] else 500
+        return jsonify(result), status_code
+
+    @app.route("/api/version")
+    def api_version():
+        """現在のバージョン情報を返す"""
+        from timetracker import __version__
+        return jsonify({"version": __version__})
+
     return app
 
 

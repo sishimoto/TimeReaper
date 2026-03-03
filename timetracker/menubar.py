@@ -69,6 +69,9 @@ class TimeTrackerApp(rumps.App):
         # カレンダー初回同期（バックグラウンド）
         self._schedule_calendar_sync()
 
+        # アップデートチェック（バックグラウンド）
+        self._check_for_updates()
+
     def toggle_tracking(self, sender):
         """記録の開始/停止を切り替え"""
         if self.is_tracking:
@@ -221,6 +224,20 @@ class TimeTrackerApp(rumps.App):
         """アプリを終了"""
         self.is_tracking = False
         rumps.quit_application()
+
+    def _check_for_updates(self):
+        """バックグラウンドでアップデートを確認し、通知を表示"""
+        def _on_update(info):
+            if info and info.is_update_available:
+                logger.info(f"新バージョン v{info.latest_version} が利用可能です")
+                rumps.notification(
+                    title="TimeTracker アップデート",
+                    subtitle=f"v{info.latest_version} が利用可能です",
+                    message="ダッシュボードからアップデートできます。",
+                )
+
+        from .updater import check_for_updates_async
+        check_for_updates_async(_on_update)
 
 
 def run_menubar_app():
