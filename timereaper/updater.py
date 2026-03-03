@@ -51,9 +51,10 @@ def parse_version(version_str: str) -> tuple[int, ...]:
 
 
 def check_for_updates(timeout: int = 5) -> Optional[UpdateInfo]:
-    """GitHub Releases API で最新バージョンを確認する
+    """GitHub Releases API とタグの両方を確認し、最新バージョンを返す
 
-    正式リリースと pre-release の両方を確認し、最も新しいものを返す。
+    Release（pre-release 含む）とタグを両方チェックし、
+    より新しいバージョンを採用する。タグのみ（Release 未作成）の場合も検出可能。
 
     Args:
         timeout: API リクエストのタイムアウト（秒）
@@ -67,7 +68,10 @@ def check_for_updates(timeout: int = 5) -> Optional[UpdateInfo]:
     try:
         headers = {"Accept": "application/vnd.github.v3+json"}
 
-        # 全リリース（pre-release 含む）を取得して最新を判定
+        # --- 1. GitHub Releases から最新を取得 ---
+        release_info = None
+        release_version = (0,)
+
         response = requests.get(
             GITHUB_ALL_RELEASES_URL, headers=headers, timeout=timeout,
             params={"per_page": 10},
@@ -75,11 +79,6 @@ def check_for_updates(timeout: int = 5) -> Optional[UpdateInfo]:
 
         if response.status_code == 200:
             releases = response.json()
-            if not releases:
-                logger.debug("リリースがありません")
-                return _check_tags_fallback(current, timeout)
-
-            # バージョンでソートして最新を取得（pre-release 含む）
             best = None
             best_version = (0,)
             for rel in releases:
@@ -91,44 +90,52 @@ def check_for_updates(timeout: int = 5) -> Optional[UpdateInfo]:
                     best_version = ver
                     best = rel
 
-            if best is None:
-                return _check_tags_fallback(current, timeout)
+            if best is not None:
+                release_version = best_version
+                latest_tag = best.get("tag_name", "")
+                latest_version = latest_tag.lstrip("v")
 
-            latest_tag = best.get("tag_name", "")
-            latest_version = latest_tag.lstrip("v")
-            # -rc 等のサフィックスを除去してバージョン比較
-            is_update = best_version > parse_version(current)
+                # DMG のダウンロード URL を探す
+                download_url = ""
+                for asset in best.get("assets", []):
+                    if asset.get("name", "").endswith(".dmg"):
+                        download_url = asset.get("browser_download_url", "")
+                        break
 
-            # DMG のダウンロード URL を探す
-            download_url = ""
-            for asset in best.get("assets", []):
-                if asset.get("name", "").endswith(".dmg"):
-                    download_url = asset.get("browser_download_url", "")
-                    break
+                release_info = UpdateInfo(
+                    current_version=current,
+                    latest_version=latest_version,
+                    is_update_available=best_version > parse_version(current),
+                    release_url=best.get("html_url", ""),
+                    release_notes=best.get("body", ""),
+                    download_url=download_url,
+                    published_at=best.get("published_at", ""),
+                )
 
-            info = UpdateInfo(
-                current_version=current,
-                latest_version=latest_version,
-                is_update_available=is_update,
-                release_url=best.get("html_url", ""),
-                release_notes=best.get("body", ""),
-                download_url=download_url,
-                published_at=best.get("published_at", ""),
-            )
+        # --- 2. タグから最新を取得（Release 未作成のバージョンも検出） ---
+        tag_info = _check_tags_fallback(current, timeout)
+        tag_version = (0,)
+        if tag_info is not None:
+            tag_version = _parse_release_version(tag_info.latest_version)
 
-            if is_update:
-                logger.info(f"新バージョンあり: v{latest_version} (現在: v{current})")
-            else:
-                logger.debug(f"最新版です: v{current}")
-
-            return info
-
-        elif response.status_code == 404:
-            logger.debug("GitHub Release が未作成。タグを確認中...")
-            return _check_tags_fallback(current, timeout)
+        # --- 3. Release とタグのうち、より新しい方を採用 ---
+        if tag_version > release_version:
+            logger.debug(f"タグ v{tag_info.latest_version} が Release より新しい")
+            result = tag_info
+        elif release_info is not None:
+            result = release_info
+        elif tag_info is not None:
+            result = tag_info
         else:
-            logger.warning(f"GitHub API エラー: HTTP {response.status_code}")
+            logger.debug("リリースもタグも見つかりません")
             return None
+
+        if result.is_update_available:
+            logger.info(f"新バージョンあり: v{result.latest_version} (現在: v{current})")
+        else:
+            logger.debug(f"最新版です: v{current}")
+
+        return result
 
     except requests.exceptions.Timeout:
         logger.warning("アップデートチェック: タイムアウト")
