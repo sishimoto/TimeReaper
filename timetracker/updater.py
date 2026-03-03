@@ -23,6 +23,7 @@ logger = logging.getLogger(__name__)
 GITHUB_OWNER = "sishimoto"
 GITHUB_REPO = "TimeTracking"
 GITHUB_API_URL = f"https://api.github.com/repos/{GITHUB_OWNER}/{GITHUB_REPO}/releases/latest"
+GITHUB_ALL_RELEASES_URL = f"https://api.github.com/repos/{GITHUB_OWNER}/{GITHUB_REPO}/releases"
 GITHUB_TAGS_URL = f"https://api.github.com/repos/{GITHUB_OWNER}/{GITHUB_REPO}/tags"
 
 
@@ -51,60 +52,84 @@ def parse_version(version_str: str) -> tuple[int, ...]:
 
 def check_for_updates(timeout: int = 5) -> Optional[UpdateInfo]:
     """GitHub Releases API で最新バージョンを確認する
-    
+
+    正式リリースと pre-release の両方を確認し、最も新しいものを返す。
+
     Args:
         timeout: API リクエストのタイムアウト（秒）
-    
+
     Returns:
         UpdateInfo: アップデート情報。取得失敗時は None
     """
     current = __version__
     logger.debug(f"アップデートチェック開始: 現在 v{current}")
-    
+
     try:
-        # まず GitHub Releases の latest を確認
         headers = {"Accept": "application/vnd.github.v3+json"}
-        response = requests.get(GITHUB_API_URL, headers=headers, timeout=timeout)
-        
+
+        # 全リリース（pre-release 含む）を取得して最新を判定
+        response = requests.get(
+            GITHUB_ALL_RELEASES_URL, headers=headers, timeout=timeout,
+            params={"per_page": 10},
+        )
+
         if response.status_code == 200:
-            data = response.json()
-            latest_tag = data.get("tag_name", "")
+            releases = response.json()
+            if not releases:
+                logger.debug("リリースがありません")
+                return _check_tags_fallback(current, timeout)
+
+            # バージョンでソートして最新を取得（pre-release 含む）
+            best = None
+            best_version = (0,)
+            for rel in releases:
+                if rel.get("draft", False):
+                    continue
+                tag = rel.get("tag_name", "")
+                ver = _parse_release_version(tag)
+                if ver > best_version:
+                    best_version = ver
+                    best = rel
+
+            if best is None:
+                return _check_tags_fallback(current, timeout)
+
+            latest_tag = best.get("tag_name", "")
             latest_version = latest_tag.lstrip("v")
-            
-            is_update = parse_version(latest_version) > parse_version(current)
-            
+            # -rc 等のサフィックスを除去してバージョン比較
+            is_update = best_version > parse_version(current)
+
             # DMG のダウンロード URL を探す
             download_url = ""
-            for asset in data.get("assets", []):
+            for asset in best.get("assets", []):
                 if asset.get("name", "").endswith(".dmg"):
                     download_url = asset.get("browser_download_url", "")
                     break
-            
+
             info = UpdateInfo(
                 current_version=current,
                 latest_version=latest_version,
                 is_update_available=is_update,
-                release_url=data.get("html_url", ""),
-                release_notes=data.get("body", ""),
+                release_url=best.get("html_url", ""),
+                release_notes=best.get("body", ""),
                 download_url=download_url,
-                published_at=data.get("published_at", ""),
+                published_at=best.get("published_at", ""),
             )
-            
+
             if is_update:
                 logger.info(f"新バージョンあり: v{latest_version} (現在: v{current})")
             else:
                 logger.debug(f"最新版です: v{current}")
-            
+
             return info
-            
+
         elif response.status_code == 404:
-            # リリースが未作成の場合、タグから確認
             logger.debug("GitHub Release が未作成。タグを確認中...")
             return _check_tags_fallback(current, timeout)
         else:
             logger.warning(f"GitHub API エラー: HTTP {response.status_code}")
             return None
-            
+
     except requests.exceptions.Timeout:
         logger.warning("アップデートチェック: タイムアウト")
         return None
@@ -114,6 +139,15 @@ def check_for_updates(timeout: int = 5) -> Optional[UpdateInfo]:
     except Exception as e:
         logger.warning(f"アップデートチェック失敗: {e}")
         return None
+
+
+def _parse_release_version(tag: str) -> tuple[int, ...]:
+    """リリースタグからバージョンタプルを生成する（-rc 等のサフィックスは無視）"""
+    cleaned = tag.strip().lstrip("v")
+    # "0.4.0-rc" → "0.4.0"
+    base = re.split(r'[-+]', cleaned)[0]
+    parts = re.findall(r'\d+', base)
+    return tuple(int(p) for p in parts)
 
 
 def _check_tags_fallback(current_version: str, timeout: int) -> Optional[UpdateInfo]:
@@ -182,7 +216,7 @@ def check_for_updates_async(callback) -> None:
 
 
 def perform_git_update() -> dict:
-    """git pull でアップデートを実行する（開発者向け）
+    """git pull でアップデートを実行する（開発環境向け）
     
     Returns:
         dict: {'success': bool, 'message': str, 'details': str}
@@ -194,11 +228,11 @@ def perform_git_update() -> dict:
         return {
             "success": False,
             "message": "Git リポジトリではありません",
-            "details": "自動アップデートは git clone されたインストール環境でのみ利用可能です。",
+            "details": "自動アップデートは git clone されたインストール環境でのみ利用可能です。\n"
+                       "DMG ダウンロードによる更新を試してください。",
         }
     
     try:
-        # 現在のブランチ確認
         result = subprocess.run(
             ["git", "rev-parse", "--abbrev-ref", "HEAD"],
             capture_output=True, text=True, cwd=project_dir, timeout=10,
@@ -206,7 +240,6 @@ def perform_git_update() -> dict:
         branch = result.stdout.strip()
         logger.info(f"現在のブランチ: {branch}")
         
-        # ローカルの変更チェック
         result = subprocess.run(
             ["git", "status", "--porcelain"],
             capture_output=True, text=True, cwd=project_dir, timeout=10,
@@ -218,7 +251,6 @@ def perform_git_update() -> dict:
                 "details": f"先に変更をコミットまたはスタッシュしてください:\n{result.stdout}",
             }
         
-        # git pull
         logger.info("git pull 実行中...")
         result = subprocess.run(
             ["git", "pull", "origin", branch],
@@ -234,7 +266,6 @@ def perform_git_update() -> dict:
         
         pull_output = result.stdout.strip()
         
-        # pip install -r requirements.txt（依存パッケージの更新）
         venv_pip = os.path.join(project_dir, "venv", "bin", "pip")
         requirements = os.path.join(project_dir, "requirements.txt")
         
@@ -247,7 +278,6 @@ def perform_git_update() -> dict:
             if result.returncode != 0:
                 logger.warning(f"pip install 警告: {result.stderr}")
         
-        # 新しいバージョンを確認
         new_version = _get_installed_version(project_dir)
         
         return {
@@ -268,6 +298,124 @@ def perform_git_update() -> dict:
             "message": f"アップデートに失敗しました: {e}",
             "details": str(e),
         }
+
+
+def perform_dmg_update(download_url: str) -> dict:
+    """DMG をダウンロードして /Applications に自動インストールする（.app バンドル向け）
+
+    1. DMG を一時ディレクトリにダウンロード
+    2. DMG をマウント
+    3. TimeTracker.app を /Applications にコピー
+    4. DMG をアンマウント・削除
+    5. 新しい .app を起動して自分自身を終了
+
+    Returns:
+        dict: {'success': bool, 'message': str, 'details': str}
+    """
+    import tempfile
+    import shutil
+
+    if not download_url:
+        return {
+            "success": False,
+            "message": "ダウンロード URL がありません",
+            "details": "GitHub Release に DMG アセットが見つかりません。",
+        }
+
+    tmpdir = None
+    mount_point = None
+    try:
+        # 1. ダウンロード
+        tmpdir = tempfile.mkdtemp(prefix="timetracker_update_")
+        dmg_path = os.path.join(tmpdir, "TimeTracker.dmg")
+        logger.info(f"DMG ダウンロード中: {download_url}")
+
+        resp = requests.get(download_url, stream=True, timeout=120)
+        resp.raise_for_status()
+        with open(dmg_path, "wb") as f:
+            for chunk in resp.iter_content(chunk_size=8192):
+                f.write(chunk)
+        logger.info(f"DMG ダウンロード完了: {os.path.getsize(dmg_path)} bytes")
+
+        # 2. DMG マウント
+        mount_point = os.path.join(tmpdir, "dmg_mount")
+        os.makedirs(mount_point, exist_ok=True)
+        result = subprocess.run(
+            ["hdiutil", "attach", dmg_path, "-mountpoint", mount_point, "-nobrowse", "-quiet"],
+            capture_output=True, text=True, timeout=30,
+        )
+        if result.returncode != 0:
+            return {
+                "success": False,
+                "message": "DMG のマウントに失敗しました",
+                "details": result.stderr,
+            }
+
+        # 3. TimeTracker.app を探す
+        app_src = os.path.join(mount_point, "TimeTracker.app")
+        if not os.path.isdir(app_src):
+            # DMG 直下にない場合サブディレクトリを探す
+            for item in os.listdir(mount_point):
+                candidate = os.path.join(mount_point, item, "TimeTracker.app")
+                if os.path.isdir(candidate):
+                    app_src = candidate
+                    break
+
+        if not os.path.isdir(app_src):
+            return {
+                "success": False,
+                "message": "DMG 内に TimeTracker.app が見つかりません",
+                "details": f"マウント先: {mount_point}, 内容: {os.listdir(mount_point)}",
+            }
+
+        # 4. /Applications にコピー
+        app_dest = "/Applications/TimeTracker.app"
+        if os.path.exists(app_dest):
+            logger.info(f"既存アプリを削除: {app_dest}")
+            shutil.rmtree(app_dest)
+
+        logger.info(f"コピー: {app_src} → {app_dest}")
+        shutil.copytree(app_src, app_dest)
+
+        # 5. アンマウント
+        subprocess.run(
+            ["hdiutil", "detach", mount_point, "-quiet"],
+            capture_output=True, timeout=10,
+        )
+
+        # 6. 新しいアプリを起動（遅延実行してから自分を終了）
+        logger.info("新しいバージョンを起動します...")
+        subprocess.Popen(
+            ["bash", "-c", f"sleep 2 && open '{app_dest}'"],
+            start_new_session=True,
+        )
+
+        return {
+            "success": True,
+            "message": "アップデート完了。アプリを再起動します...",
+            "details": f"インストール先: {app_dest}",
+            "restart": True,
+        }
+
+    except requests.exceptions.RequestException as e:
+        return {
+            "success": False,
+            "message": f"ダウンロードに失敗しました: {e}",
+            "details": str(e),
+        }
+    except Exception as e:
+        return {
+            "success": False,
+            "message": f"アップデートに失敗しました: {e}",
+            "details": str(e),
+        }
+    finally:
+        # クリーンアップ
+        if mount_point and os.path.ismount(mount_point):
+            subprocess.run(["hdiutil", "detach", mount_point, "-quiet"],
+                           capture_output=True, timeout=10)
+        if tmpdir and os.path.exists(tmpdir):
+            shutil.rmtree(tmpdir, ignore_errors=True)
 
 
 def _get_installed_version(project_dir: str) -> str:

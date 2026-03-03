@@ -52,6 +52,11 @@ OPTIONS = {
         "flask",
         "jinja2",
         "rumps",
+        "requests",
+        "urllib3",
+        "certifi",
+        "charset_normalizer",
+        "idna",
     ],
     "includes": [
         "timetracker.config",

@@ -281,9 +281,32 @@ def create_app():
 
     @app.route("/api/update", methods=["POST"])
     def api_perform_update():
-        """git pull でアップデートを実行する"""
-        from .updater import perform_git_update
-        result = perform_git_update()
+        """アップデートを実行する（環境に応じて git pull か DMG ダウンロードを使い分ける）"""
+        from .updater import perform_git_update, perform_dmg_update
+
+        data = request.get_json() or {}
+        download_url = data.get("download_url", "")
+
+        # .app バンドルかどうかを判定
+        app_path = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        is_app_bundle = app_path.endswith(".app/Contents/Resources") or \
+                        ".app/" in app_path
+
+        if is_app_bundle and download_url:
+            # .app バンドル → DMG ダウンロード＆置き換え
+            result = perform_dmg_update(download_url)
+            if result.get("restart"):
+                # 成功時: アプリ終了をスケジュール
+                import threading
+                def _quit_later():
+                    import time
+                    time.sleep(1)
+                    os._exit(0)
+                threading.Thread(target=_quit_later, daemon=True).start()
+        else:
+            # 開発環境 → git pull
+            result = perform_git_update()
+
         status_code = 200 if result["success"] else 500
         return jsonify(result), status_code
 

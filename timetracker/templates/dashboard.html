@@ -1285,12 +1285,15 @@
         }
 
         // --- アップデートチェック ---
+        let _updateDownloadUrl = '';
+
         async function checkForUpdates() {
             try {
                 const res = await fetch('/api/check-update');
                 if (!res.ok) return;
                 const data = await res.json();
                 if (data.is_update_available) {
+                    _updateDownloadUrl = data.download_url || '';
                     document.getElementById('updateVersion').textContent = 'v' + data.latest_version;
                     document.getElementById('updateReleaseLink').href = data.release_url || '#';
                     const notesEl = document.getElementById('updateNotes');
@@ -1307,7 +1310,6 @@
 
         function dismissUpdate() {
             document.getElementById('updateBanner').classList.remove('visible');
-            // セッション中は再表示しない
             sessionStorage.setItem('updateDismissed', '1');
         }
 
@@ -1316,13 +1318,20 @@
             btn.textContent = '更新中...';
             btn.disabled = true;
             try {
-                const res = await fetch('/api/update', { method: 'POST' });
+                const res = await fetch('/api/update', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ download_url: _updateDownloadUrl }),
+                });
                 const data = await res.json();
                 if (data.success) {
+                    const restartMsg = data.restart
+                        ? ' — アプリを自動的に再起動します...'
+                        : ' — アプリを再起動してください';
                     document.getElementById('updateBanner').innerHTML =
                         '<span class="update-icon">✅</span>' +
                         '<div class="update-text"><strong>' + data.message + '</strong>' +
-                        ' — アプリを再起動してください</div>' +
+                        restartMsg + '</div>' +
                         '<button class="update-btn-close" onclick="dismissUpdate()">&times;</button>';
                 } else {
                     btn.textContent = '失敗';
