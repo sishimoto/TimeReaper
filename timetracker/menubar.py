@@ -17,7 +17,9 @@ from .config import get_config
 from .database import init_db, insert_activity, get_daily_summary, get_current_meeting
 from .monitor import ActiveWindowMonitor, WindowInfo
 from .classifier import ActivityClassifier
-from .dashboard import run_dashboard
+from .dashboard import run_dashboard, set_pomodoro_timer, set_settings_change_callback
+from .user_settings import load_user_settings, get_user_settings
+from .pomodoro import PomodoroTimer, PomodoroState, LongWorkAlert
 
 logger = logging.getLogger(__name__)
 
@@ -61,6 +63,19 @@ class TimeTrackerApp(rumps.App):
 
         # DB初期化
         init_db()
+
+        # ユーザー設定を読み込み
+        self._user_settings = load_user_settings()
+
+        # ポモドーロタイマーの初期化
+        self._pomodoro_timer = self._create_pomodoro_timer()
+        set_pomodoro_timer(self._pomodoro_timer)
+
+        # 長時間作業アラートの初期化
+        self._long_work_alert = self._create_long_work_alert()
+
+        # 設定変更コールバックの登録
+        set_settings_change_callback(self._on_settings_changed)
 
         # ダッシュボードサーバー起動
         self._start_dashboard()
@@ -121,6 +136,8 @@ class TimeTrackerApp(rumps.App):
                             logger.info("アイドル検出 - 計測を一時停止")
                             self._is_currently_idle = True
                         self.title = "⏱ 💤"
+                        # 長時間アラート: アイドル通知
+                        self._long_work_alert.on_activity(is_idle=True)
                     else:
                         # アクティブ状態
                         if self._is_currently_idle:
@@ -159,6 +176,9 @@ class TimeTrackerApp(rumps.App):
 
                         self._last_timestamp = now
                         self.title = "⏱ REC"
+
+                        # 長時間アラート: アクティブ通知
+                        self._long_work_alert.on_activity(is_idle=False)
 
                     self._last_window = window_info
 
@@ -226,6 +246,81 @@ class TimeTrackerApp(rumps.App):
         """アプリを終了"""
         self.is_tracking = False
         rumps.quit_application()
+
+    def _create_pomodoro_timer(self) -> PomodoroTimer:
+        """ユーザー設定からポモドーロタイマーを生成する"""
+        pom = self._user_settings.get("pomodoro", {})
+        timer = PomodoroTimer(
+            work_minutes=pom.get("work_minutes", 25),
+            short_break_minutes=pom.get("short_break_minutes", 5),
+            long_break_minutes=pom.get("long_break_minutes", 15),
+            sessions_before_long_break=pom.get("sessions_before_long_break", 4),
+            auto_start_break=pom.get("auto_start_break", True),
+            auto_start_work=pom.get("auto_start_work", False),
+            on_timer_complete=self._on_pomodoro_complete,
+        )
+        return timer
+
+    def _create_long_work_alert(self) -> LongWorkAlert:
+        """ユーザー設定から長時間作業アラートを生成する"""
+        notif = self._user_settings.get("notifications", {})
+        lwa = notif.get("long_work_alert", {})
+        alert = LongWorkAlert(
+            threshold_minutes=lwa.get("threshold_minutes", 60),
+            interval_minutes=lwa.get("interval_minutes", 30),
+            message=lwa.get("message", "長時間の連続作業です。休憩を取りましょう！"),
+            on_alert=self._on_long_work_alert,
+        )
+        alert._enabled = lwa.get("enabled", False)
+        return alert
+
+    def _on_pomodoro_complete(self, completed_state: PomodoroState):
+        """ポモドーロタイマー完了時のコールバック"""
+        pom = self._user_settings.get("pomodoro", {})
+        if not pom.get("enabled", False):
+            return
+        if completed_state == PomodoroState.WORKING:
+            rumps.notification(
+                title="🍅 ポモドーロ完了",
+                subtitle="お疲れさまです！",
+                message="休憩を取りましょう。",
+            )
+        elif completed_state in (PomodoroState.SHORT_BREAK, PomodoroState.LONG_BREAK):
+            rumps.notification(
+                title="☕ 休憩終了",
+                subtitle="",
+                message="作業を再開しましょう！",
+            )
+
+    def _on_long_work_alert(self, message: str, elapsed_minutes: int):
+        """長時間作業アラートのコールバック"""
+        rumps.notification(
+            title="⏰ 長時間作業アラート",
+            subtitle=f"連続 {elapsed_minutes} 分作業中",
+            message=message,
+        )
+
+    def _on_settings_changed(self, new_settings: dict):
+        """ダッシュボードから設定が変更されたときに呼ばれる"""
+        self._user_settings = new_settings
+        pom = new_settings.get("pomodoro", {})
+        self._pomodoro_timer.update_config(
+            work_minutes=pom.get("work_minutes", 25),
+            short_break_minutes=pom.get("short_break_minutes", 5),
+            long_break_minutes=pom.get("long_break_minutes", 15),
+            sessions_before_long_break=pom.get("sessions_before_long_break", 4),
+            auto_start_break=pom.get("auto_start_break", True),
+            auto_start_work=pom.get("auto_start_work", False),
+        )
+        notif = new_settings.get("notifications", {})
+        lwa = notif.get("long_work_alert", {})
+        self._long_work_alert.update_config(
+            threshold_minutes=lwa.get("threshold_minutes", 60),
+            interval_minutes=lwa.get("interval_minutes", 30),
+            message=lwa.get("message", "長時間の連続作業です。休憩を取りましょう！"),
+        )
+        self._long_work_alert._enabled = lwa.get("enabled", False)
+        logger.info("ユーザー設定を反映しました")
 
     def _check_for_updates(self):
         """バックグラウンドでアップデートを確認し、通知を表示"""

@@ -23,6 +23,35 @@ from .database import (
     get_time_blocks,
 )
 
+# グローバル: ポモドーロタイマーインスタンス（メニューバーアプリから設定される）
+_pomodoro_timer = None
+_settings_change_callback = None
+
+
+def set_pomodoro_timer(timer):
+    """メニューバーアプリからポモドーロタイマーを登録する"""
+    global _pomodoro_timer
+    _pomodoro_timer = timer
+
+
+def set_settings_change_callback(callback):
+    """設定変更時のコールバックを登録する"""
+    global _settings_change_callback
+    _settings_change_callback = callback
+
+
+def _get_pomodoro_timer():
+    return _pomodoro_timer
+
+
+def _notify_settings_changed(settings):
+    if _settings_change_callback:
+        try:
+            _settings_change_callback(settings)
+        except Exception as e:
+            import logging
+            logging.getLogger(__name__).error(f"設定変更通知エラー: {e}")
+
 
 def create_app():
     """Flaskアプリケーションを生成する"""
@@ -263,6 +292,63 @@ def create_app():
         """現在のバージョン情報を返す"""
         from timetracker import __version__
         return jsonify({"version": __version__})
+
+    # --- 設定ページ ---
+    @app.route("/settings")
+    def settings_page():
+        """ユーザー設定ページ"""
+        return render_template("settings.html")
+
+    # --- 設定API ---
+    @app.route("/api/settings", methods=["GET"])
+    def api_get_settings():
+        """ユーザー設定を取得する"""
+        from .user_settings import get_user_settings
+        settings = get_user_settings()
+        return jsonify(settings)
+
+    @app.route("/api/settings", methods=["POST"])
+    def api_save_settings():
+        """ユーザー設定を保存する"""
+        data = request.get_json()
+        if not data:
+            return jsonify({"ok": False, "error": "No data"}), 400
+        from .user_settings import save_user_settings
+        save_user_settings(data)
+        # メニューバーアプリに設定変更を通知
+        _notify_settings_changed(data)
+        return jsonify({"ok": True})
+
+    # --- ポモドーロAPI ---
+    @app.route("/api/pomodoro/status")
+    def api_pomodoro_status():
+        """ポモドーロタイマーの現在の状態を返す"""
+        timer = _get_pomodoro_timer()
+        if timer is None:
+            return jsonify({"state": "idle", "remaining_seconds": 0,
+                            "total_seconds": 0, "session_count": 0,
+                            "is_running": False, "remaining_display": "00:00"})
+        return jsonify(timer.status.to_dict())
+
+    @app.route("/api/pomodoro/<action>", methods=["POST"])
+    def api_pomodoro_action(action):
+        """ポモドーロタイマーのアクション（start_work, start_break, pause, resume, stop, skip）"""
+        timer = _get_pomodoro_timer()
+        if timer is None:
+            return jsonify({"error": "Pomodoro timer not initialized"}), 503
+        actions = {
+            "start_work": timer.start_work,
+            "start_break": timer.start_break,
+            "pause": timer.pause,
+            "resume": timer.resume,
+            "stop": timer.stop,
+            "skip": timer.skip,
+        }
+        fn = actions.get(action)
+        if fn is None:
+            return jsonify({"error": f"Unknown action: {action}"}), 400
+        status = fn()
+        return jsonify(status.to_dict())
 
     @app.route("/api/llm-classify", methods=["POST"])
     def api_llm_classify():

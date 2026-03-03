@@ -30,6 +30,7 @@ DATA_FILES = [
         "timetracker/templates/dashboard.html",
         "timetracker/templates/summary.html",
         "timetracker/templates/weekly.html",
+        "timetracker/templates/settings.html",
     ]),
 ]
 OPTIONS = {
