@@ -494,6 +494,8 @@
             <button class="secondary" onclick="selectAll()">全選択</button>
             <button class="secondary" onclick="deselectAll()">全解除</button>
             <button class="secondary" onclick="selectUntagged()">未タグのみ</button>
+            <span style="flex:1"></span>
+            <button class="secondary" id="llmBtn" onclick="runLlmClassify()" style="display:none;" title="LLM でアクティビティを自動分類">🤖 AI分類</button>
         </div>
 
         <!-- Block Table -->
@@ -877,6 +879,43 @@
             toast.textContent = msg;
             toast.classList.add('show');
             setTimeout(() => toast.classList.remove('show'), 3000);
+        }
+
+        // --- LLM 分類 ---
+        async function checkLlmStatus() {
+            try {
+                const res = await fetch('/api/llm-status');
+                const data = await res.json();
+                if (data.enabled && data.has_api_key) {
+                    document.getElementById('llmBtn').style.display = '';
+                }
+            } catch(e) {}
+        }
+        checkLlmStatus();
+
+        async function runLlmClassify() {
+            const btn = document.getElementById('llmBtn');
+            btn.textContent = '🤖 分類中...';
+            btn.disabled = true;
+            try {
+                // まずプレビュー
+                const res = await fetch('/api/llm-classify', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({date: currentDate, dry_run: false, min_confidence: 0.5}),
+                });
+                const data = await res.json();
+                if (data.success) {
+                    showToast(`AI分類: ${data.applied}件適用、${data.skipped}件スキップ`);
+                    loadBlocks();  // データ再読み込み
+                } else {
+                    showToast('AI分類エラー: ' + data.message);
+                }
+            } catch(e) {
+                showToast('AI分類に失敗しました');
+            }
+            btn.textContent = '🤖 AI分類';
+            btn.disabled = false;
         }
     </script>
 </body>

@@ -248,6 +248,34 @@ def create_app():
         from timetracker import __version__
         return jsonify({"version": __version__})
 
+    @app.route("/api/llm-classify", methods=["POST"])
+    def api_llm_classify():
+        """LLM でアクティビティを自動分類する"""
+        data = request.get_json() or {}
+        target_date = data.get("date", date.today().isoformat())
+        dry_run = data.get("dry_run", False)
+        min_confidence = data.get("min_confidence", 0.5)
+
+        from .llm_classifier import classify_with_llm
+        result = classify_with_llm(
+            target_date=target_date,
+            dry_run=dry_run,
+            min_confidence=min_confidence,
+        )
+        status_code = 200 if result.get("success") else 500
+        return jsonify(result), status_code
+
+    @app.route("/api/llm-status")
+    def api_llm_status():
+        """LLM 分類の有効/無効状態を返す"""
+        from .llm_classifier import get_llm_config
+        config = get_llm_config()
+        return jsonify({
+            "enabled": config["enabled"],
+            "has_api_key": bool(config["api_key"]),
+            "model": config["model"],
+        })
+
     return app
 
 

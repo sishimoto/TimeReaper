@@ -112,10 +112,34 @@ class ActivityClassifier:
             window_info.app_name,
             window_info.window_title,
             window_info.url,
+            getattr(window_info, 'tab_title', None),
         ]))
+
+        # 0. URL 解析で追加コンテキストを取得
+        url_context = URLAnalyzer.analyze(window_info.url) if window_info.url else {}
+        url_service = url_context.get("service", "")
+
+        # URL サービスからの独立カテゴリ上書き
+        url_service_overrides = {
+            "Google Meet": "meeting",
+            "Slack": "communication",
+            "Google Docs": "documentation",
+            "Confluence": "documentation",
+            "Notion": "documentation",
+            "Jira": "planning",
+            "Linear": "planning",
+            "Figma": "設計",  # サブフェーズとして扱う
+        }
 
         # 1. 独立カテゴリの判定（meeting / communication / email 等）
         standalone = self._match_standalone(search_text)
+
+        # URL サービスから独立カテゴリを強化
+        if not standalone and url_service in url_service_overrides:
+            override = url_service_overrides[url_service]
+            if override in STANDALONE_PHASES:
+                standalone = override
+
         if standalone:
             result["work_phase"] = standalone
             # 独立カテゴリには費用分類を割り当てない
@@ -124,8 +148,25 @@ class ActivityClassifier:
         # 2. プロジェクトタイプ判定（カスタム開発 / プロダクト開発）
         project_type, cost_category = self._detect_project_type(search_text)
 
+        # GitHub URLからプロジェクトタイプを推定（より精度の高い判定）
+        if url_service == "GitHub" and url_context.get("details", {}).get("match_groups"):
+            groups = url_context["details"]["match_groups"]
+            if len(groups) >= 2:
+                repo_name = groups[1]  # リポジトリ名
+                # リポジトリ名でプロジェクトタイプを再判定
+                repo_type, repo_cost = self._detect_project_type(repo_name)
+                if repo_cost:
+                    project_type = repo_type
+                    cost_category = repo_cost
+
         # 3. サブフェーズ判定（実装 / 設計 / テスト 等）
         sub_phase = self._match_sub_phase(search_text, window_info.app_name)
+
+        # URL サービスからサブフェーズを強化
+        if not sub_phase and url_service in url_service_overrides:
+            override = url_service_overrides[url_service]
+            if override not in STANDALONE_PHASES:
+                sub_phase = override
 
         # 4. タスク分類 = プロジェクトタイプ + サブフェーズ
         if sub_phase:
@@ -139,6 +180,7 @@ class ActivityClassifier:
         logger.debug(
             f"分類結果: work_phase={result['work_phase']}, "
             f"project={result['project']}, category={result['category']}"
+            f"{f', url_service={url_service}' if url_service else ''}"
         )
         return result
 
