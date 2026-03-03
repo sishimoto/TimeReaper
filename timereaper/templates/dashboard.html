@@ -38,12 +38,22 @@
         }
 
         header {
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
             margin-bottom: 24px;
             padding-bottom: 16px;
             border-bottom: 1px solid var(--border);
+        }
+
+        .header-top {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 12px;
+        }
+
+        .header-left {
+            display: flex;
+            align-items: center;
+            gap: 10px;
         }
 
         header h1 {
@@ -59,20 +69,41 @@
             font-size: 28px;
         }
 
+        .nav-links {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .nav-links a {
+            background: var(--bg-secondary);
+            border: 1px solid var(--border);
+            padding: 5px 12px;
+            border-radius: 6px;
+            font-size: 13px;
+            text-decoration: none;
+            cursor: pointer;
+            transition: background 0.2s;
+        }
+
+        .nav-links a:hover {
+            background: var(--bg-card);
+        }
+
         .date-nav {
             display: flex;
             align-items: center;
-            gap: 12px;
+            gap: 8px;
         }
 
         .date-nav button {
             background: var(--bg-secondary);
             border: 1px solid var(--border);
             color: var(--text-primary);
-            padding: 6px 14px;
+            padding: 5px 12px;
             border-radius: 6px;
             cursor: pointer;
-            font-size: 14px;
+            font-size: 13px;
             transition: background 0.2s;
         }
 
@@ -84,9 +115,9 @@
             background: var(--bg-secondary);
             border: 1px solid var(--border);
             color: var(--text-primary);
-            padding: 6px 12px;
+            padding: 5px 10px;
             border-radius: 6px;
-            font-size: 14px;
+            font-size: 13px;
         }
 
         /* Update Banner */
@@ -570,15 +601,21 @@
 <body>
     <div class="container">
         <header>
-            <h1>TimeReaper <span id="versionBadge" style="font-size: 12px; font-weight: 400; background: var(--bg-secondary); border: 1px solid var(--border); color: var(--text-secondary); padding: 2px 8px; border-radius: 10px; vertical-align: middle; margin-left: 6px;"></span></h1>
-            <div class="date-nav">
-                <div class="status-bar">
-                    <div class="status-dot" id="statusDot"></div>
-                    <span id="statusText">監視中</span>
+            <div class="header-top">
+                <div class="header-left">
+                    <h1>TimeReaper <span id="versionBadge" style="font-size: 11px; font-weight: 400; background: var(--bg-secondary); border: 1px solid var(--border); color: var(--text-secondary); padding: 2px 8px; border-radius: 10px; vertical-align: middle; margin-left: 4px;"></span></h1>
+                    <div class="status-bar" style="margin-left: 8px;">
+                        <div class="status-dot" id="statusDot"></div>
+                        <span id="statusText">監視中</span>
+                    </div>
                 </div>
-                <a href="#" id="summaryLink" style="background: var(--bg-secondary); border: 1px solid var(--border); color: var(--accent-blue); padding: 6px 14px; border-radius: 6px; font-size: 14px; text-decoration: none; cursor: pointer;">📋 日次サマリー</a>
-                <a href="/weekly" style="background: var(--bg-secondary); border: 1px solid var(--border); color: var(--accent-purple); padding: 6px 14px; border-radius: 6px; font-size: 14px; text-decoration: none; cursor: pointer;">📊 週次レポート</a>
-                <a href="/settings" style="background: var(--bg-secondary); border: 1px solid var(--border); color: var(--accent-orange); padding: 6px 14px; border-radius: 6px; font-size: 14px; text-decoration: none; cursor: pointer;">⚙ 設定</a>
+                <div class="nav-links">
+                    <a href="#" id="summaryLink" style="color: var(--accent-blue);">📋 サマリー</a>
+                    <a href="/weekly" style="color: var(--accent-purple);">📊 週次</a>
+                    <a href="/settings" style="color: var(--accent-orange);">⚙ 設定</a>
+                </div>
+            </div>
+            <div class="date-nav">
                 <button onclick="changeDate(-1)">← 前日</button>
                 <input type="date" id="datePicker" onchange="loadDate(this.value)">
                 <button onclick="changeDate(1)">翌日 →</button>
