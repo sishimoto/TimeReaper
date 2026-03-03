@@ -40,6 +40,7 @@ class TimeReaperApp(rumps.App):
         )
         self.classifier = ActivityClassifier()
         self.is_tracking = False
+        self._stop_event = threading.Event()  # スレッド停止用イベント
         self._tracker_thread = None
         self._dashboard_thread = None
         self._last_window: WindowInfo | None = None
@@ -102,6 +103,14 @@ class TimeReaperApp(rumps.App):
         """バックグラウンドでトラッキングを開始"""
         if self.is_tracking:
             return
+
+        # 前のスレッドが残っていれば完全に停止してから再開
+        if self._tracker_thread and self._tracker_thread.is_alive():
+            logger.info("前のトラッキングスレッドの終了を待機中...")
+            self._stop_event.set()
+            self._tracker_thread.join(timeout=10)
+
+        self._stop_event.clear()
         self.is_tracking = True
         self._tracker_thread = threading.Thread(target=self._tracking_loop, daemon=True)
         self._tracker_thread.start()
@@ -116,14 +125,19 @@ class TimeReaperApp(rumps.App):
     def _stop_tracking(self):
         """トラッキングを停止"""
         self.is_tracking = False
+        self._stop_event.set()  # スレッドに停止を通知
+        if self._tracker_thread and self._tracker_thread.is_alive():
+            self._tracker_thread.join(timeout=10)
         self.title = "⏱"
         logger.info("トラッキング停止")
 
     def _tracking_loop(self):
         """メインのトラッキングループ"""
         interval = self.config.get("monitor", {}).get("interval_seconds", 5)
+        thread_id = threading.current_thread().ident
+        logger.info(f"トラッキングループ開始 (thread={thread_id})")
 
-        while self.is_tracking:
+        while self.is_tracking and not self._stop_event.is_set():
             try:
                 window_info = self.monitor.get_active_window()
                 if window_info:
@@ -185,7 +199,10 @@ class TimeReaperApp(rumps.App):
             except Exception as e:
                 logger.error(f"トラッキングエラー: {e}")
 
-            time.sleep(interval)
+            # time.sleep ではなく Event.wait で待機（停止要求に即応答）
+            self._stop_event.wait(timeout=interval)
+
+        logger.info(f"トラッキングループ終了 (thread={thread_id})")
 
     def _start_dashboard(self):
         """ダッシュボードサーバーをバックグラウンドで起動"""

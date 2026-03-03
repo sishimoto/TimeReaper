@@ -194,6 +194,27 @@ def cmd_export(args):
     print(f"✅ {len(activities)} 件のレコードを {output} にエクスポートしました")
 
 
+def cmd_cleanup(args):
+    """データベースの重複レコードを削除"""
+    from timereaper.database import deduplicate_activity_log
+
+    # まず重複数を確認
+    count = deduplicate_activity_log(dry_run=True)
+    if count == 0:
+        print("✅ 重複レコードはありません")
+        return
+
+    print(f"🔍 {count} 件の重複レコードが見つかりました")
+
+    if args.dry_run:
+        print("  --execute オプションで実際に削除できます")
+        return
+
+    # 実際に削除
+    deleted = deduplicate_activity_log(dry_run=False)
+    print(f"🗑️ {deleted} 件の重複レコードを削除しました")
+
+
 def main():
     parser = argparse.ArgumentParser(
         description="TimeReaper - macOS稼働時間管理アプリ",
@@ -238,7 +259,19 @@ def main():
     exp_parser.add_argument("--end", type=str, help="終了日 (YYYY-MM-DD)")
     exp_parser.add_argument("--output", type=str, help="出力ファイル名")
 
+    # cleanup
+    cleanup_parser = subparsers.add_parser("cleanup", help="重複レコードを削除")
+    cleanup_parser.add_argument(
+        "--execute", action="store_true", dest="execute",
+        help="実際に削除を実行（デフォルトはドライラン）"
+    )
+    cleanup_parser.set_defaults(dry_run=True)
+
     args = parser.parse_args()
+
+    # --execute が指定された場合 dry_run を無効に
+    if hasattr(args, 'execute') and args.execute:
+        args.dry_run = False
 
     # .app バンドルからの起動等、サブコマンド未指定時はデフォルトで start
     if args.command is None:
@@ -255,6 +288,7 @@ def main():
         "dashboard": cmd_dashboard,
         "sync-calendar": cmd_sync_calendar,
         "export": cmd_export,
+        "cleanup": cmd_cleanup,
     }
 
     if args.command in commands:

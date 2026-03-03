@@ -581,7 +581,11 @@ def get_time_blocks(target_date: Optional[str] = None, block_minutes: int = 10) 
             })
 
     # 多数決で work_phase / project を決定し、内部カウントを除去
+    max_seconds = block_minutes * 60
     for blk in blocks:
+        # 合計秒数がブロック上限を超えないようキャップ
+        if blk["total_seconds"] > max_seconds:
+            blk["total_seconds"] = max_seconds
         wp_counts = blk.pop("_wp_counts")
         pj_counts = blk.pop("_pj_counts")
         blk["work_phase"] = max(wp_counts, key=wp_counts.get) if wp_counts else ""
@@ -595,3 +599,42 @@ def get_time_blocks(target_date: Optional[str] = None, block_minutes: int = 10) 
         blk.pop("_titles_set", None)
 
     return blocks
+
+
+def deduplicate_activity_log(dry_run: bool = True) -> int:
+    """重複するアクティビティログレコードを削除する
+
+    連続する2つのレコードのタイムスタンプ差が100ms未満で、同一アプリ名のものを
+    重複とみなし、後者（IDが大きい方）を削除する。
+
+    Args:
+        dry_run: True の場合は削除せずに重複数のみ返す
+
+    Returns:
+        削除（または削除予定）のレコード数
+    """
+    with get_connection() as conn:
+        # 100ms未満の差で同一アプリ名の連続レコードを重複と判定
+        duplicate_ids = conn.execute("""
+            SELECT b.id
+            FROM activity_log a
+            JOIN activity_log b ON b.id = a.id + 1
+            WHERE a.app_name = b.app_name
+              AND a.is_idle = b.is_idle
+              AND (julianday(b.timestamp) - julianday(a.timestamp)) * 86400 < 0.1
+        """).fetchall()
+
+        ids_to_delete = [row["id"] for row in duplicate_ids]
+
+        if not dry_run and ids_to_delete:
+            # バッチ削除（SQLite の IN 句制限を考慮して分割）
+            batch_size = 500
+            for i in range(0, len(ids_to_delete), batch_size):
+                batch = ids_to_delete[i:i + batch_size]
+                placeholders = ",".join("?" * len(batch))
+                conn.execute(
+                    f"DELETE FROM activity_log WHERE id IN ({placeholders})",
+                    batch,
+                )
+
+    return len(ids_to_delete)
