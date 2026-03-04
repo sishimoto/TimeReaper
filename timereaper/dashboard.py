@@ -7,6 +7,7 @@ import os
 from datetime import date, timedelta
 from flask import Flask, jsonify, request, render_template, send_from_directory
 from flask_cors import CORS
+import requests
 
 from .config import get_config
 from .database import (
@@ -296,10 +297,37 @@ def create_app():
             # .app バンドル → DMG ダウンロードで更新
             if not download_url:
                 # download_url が未取得の場合、再度チェックして取得を試みる
-                from .updater import check_for_updates
+                from .updater import check_for_updates, GITHUB_OWNER, GITHUB_REPO
                 info = check_for_updates()
                 if info and info.download_url:
                     download_url = info.download_url
+                elif info and info.is_update_available:
+                    # API からアセット URL が取れない場合、既知のパターンで構築
+                    tag = f"v{info.latest_version}"
+                    download_url = (
+                        f"https://github.com/{GITHUB_OWNER}/{GITHUB_REPO}"
+                        f"/releases/download/{tag}/TimeReaper-{tag}.dmg"
+                    )
+
+            if not download_url:
+                # download_url が構築できない場合（バージョン情報すら取れない）
+                # RC タグパターンも試す
+                from .updater import check_for_updates, GITHUB_OWNER, GITHUB_REPO
+                info = check_for_updates() if 'info' not in dir() else info
+                if info and info.latest_version:
+                    tag = f"v{info.latest_version}"
+                    for suffix in ["", "-rc"]:
+                        candidate = (
+                            f"https://github.com/{GITHUB_OWNER}/{GITHUB_REPO}"
+                            f"/releases/download/{tag}{suffix}/TimeReaper-{tag}{suffix}.dmg"
+                        )
+                        try:
+                            head_resp = requests.head(candidate, timeout=5, allow_redirects=True)
+                            if head_resp.status_code == 200:
+                                download_url = candidate
+                                break
+                        except Exception:
+                            continue
 
             if download_url:
                 result = perform_dmg_update(download_url)
@@ -314,9 +342,8 @@ def create_app():
             else:
                 result = {
                     "success": False,
-                    "message": "DMG ダウンロード URL を取得できませんでした",
-                    "details": "GitHub Releases ページから手動でダウンロードしてください:\n"
-                               "https://github.com/sishimoto/TimeReaper/releases",
+                    "message": "DMG のダウンロード URL を特定できませんでした",
+                    "details": "ネットワーク接続を確認し、再度お試しください。",
                 }
         else:
             # 開発環境 → git pull
