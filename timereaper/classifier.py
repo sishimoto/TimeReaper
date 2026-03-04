@@ -13,17 +13,18 @@
   2. 費用分類 (project): 会計上の費用/資産計上区分
      - Impulse個別開発 / Impulse製品開発（共通機能の改良・強化）/ etc.
 
-■ 自動判定ロジック:
-  1. プロジェクトタイプ判定（ウィンドウタイトル / URL のリポジトリ名）
+■ 自動判定ロジック (v2):
+  1. 独立カテゴリ判定（meeting / communication / email 等）
+     → work_phase を設定するが、project 推定は引き続き実行
+  2. プロジェクトタイプ判定（ウィンドウタイトル / URL のリポジトリ名）
      - "impulse-pj-*" → カスタム開発
      - "impulse*" (pj 以外) → プロダクト開発
-     - その他 → カスタム開発（デフォルト）
-  2. サブフェーズ判定（使用アプリ / URL パターン）
-     - IDE / Terminal → 実装
-     - Figma / Miro → 設計
-     - etc.
-  3. タスク分類 = プロジェクトタイプ + サブフェーズ (例: "カスタム開発-実装")
-  4. 費用分類 = プロジェクトタイプから自動導出
+     - マッチしない場合 → project 空（デフォルト fallback なし）
+  3. Slack チャンネル名からプロジェクト推定
+  4. カレンダーイベントタイトルからプロジェクト推定（会議中優先）
+  5. サブフェーズ判定（アプリ名ベース or 全テキスト）
+  6. タスク分類 = プロジェクトタイプ + サブフェーズ (例: "カスタム開発-実装")
+  7. 費用分類 = プロジェクトタイプから自動導出
 """
 
 import re
@@ -77,10 +78,16 @@ class ActivityClassifier:
             })
 
         # サブフェーズ判定ルール（設計 / 実装 / テスト 等）
-        self.sub_phase_rules: dict[str, list[re.Pattern]] = {}
+        # match_target を読み込む（"app_name" or "search_text"）
+        self.sub_phase_rules: list[dict] = []
         for phase_name, phase_config in rules.get("sub_phases", {}).items():
             patterns = [re.compile(kw, re.IGNORECASE) for kw in phase_config.get("keywords", [])]
-            self.sub_phase_rules[phase_name] = patterns
+            match_target = phase_config.get("match_target", "search_text")
+            self.sub_phase_rules.append({
+                "name": phase_name,
+                "patterns": patterns,
+                "match_target": match_target,
+            })
 
         # 独立カテゴリ判定ルール（communication / email 等）
         self.standalone_rules: dict[str, list[re.Pattern]] = {}
@@ -88,11 +95,34 @@ class ActivityClassifier:
             patterns = [re.compile(kw, re.IGNORECASE) for kw in phase_config.get("keywords", [])]
             self.standalone_rules[phase_name] = patterns
 
-        # デフォルトプロジェクトタイプ
-        self.default_project_type = rules.get("default_project_type", "カスタム開発")
+        # Slack チャンネル → プロジェクトマッピング（案C）
+        self.slack_channel_rules: list[dict] = []
+        for rule in rules.get("slack_channel_rules", []):
+            self.slack_channel_rules.append({
+                "channels": [ch.lower() for ch in rule.get("channels", [])],
+                "project": rule.get("project", ""),
+                "work_phase": rule.get("work_phase", ""),
+            })
 
-    def classify(self, window_info: WindowInfo) -> dict:
+        # カレンダーイベントタイトル → プロジェクトマッピング（案B）
+        self.calendar_project_rules: list[dict] = []
+        for rule in rules.get("calendar_project_rules", []):
+            patterns = [re.compile(kw, re.IGNORECASE) for kw in rule.get("keywords", [])]
+            self.calendar_project_rules.append({
+                "patterns": patterns,
+                "project": rule.get("project", ""),
+                "work_phase": rule.get("work_phase", ""),
+            })
+
+        # デフォルトプロジェクトタイプ
+        self.default_project_type = rules.get("default_project_type", "")
+
+    def classify(self, window_info: WindowInfo, meeting_title: str = "") -> dict:
         """ウィンドウ情報からタスク分類（work_phase）と費用分類（project）を推定する
+
+        Args:
+            window_info: アクティブウィンドウの情報
+            meeting_title: カレンダーの会議タイトル（進行中の場合）
 
         Returns:
             {
@@ -142,45 +172,66 @@ class ActivityClassifier:
 
         if standalone:
             result["work_phase"] = standalone
-            # 独立カテゴリには費用分類を割り当てない
-            return result
+            # ★ v2: 独立カテゴリでも project 推定を継続する（早期 return しない）
 
-        # 2. プロジェクトタイプ判定（カスタム開発 / プロダクト開発）
-        project_type, cost_category = self._detect_project_type(search_text)
+        # 2. カレンダーイベントタイトルからプロジェクト推定（案B: 最優先）
+        if meeting_title:
+            cal_project = self._match_calendar_project(meeting_title)
+            if cal_project:
+                result["project"] = cal_project
+                logger.debug(f"カレンダーからプロジェクト推定: {cal_project} (title={meeting_title})")
 
-        # GitHub URLからプロジェクトタイプを推定（より精度の高い判定）
-        if url_service == "GitHub" and url_context.get("details", {}).get("match_groups"):
-            groups = url_context["details"]["match_groups"]
-            if len(groups) >= 2:
-                repo_name = groups[1]  # リポジトリ名
-                # リポジトリ名でプロジェクトタイプを再判定
-                repo_type, repo_cost = self._detect_project_type(repo_name)
-                if repo_cost:
-                    project_type = repo_type
-                    cost_category = repo_cost
+        # 3. Slack チャンネル名からプロジェクト推定（案C）
+        if not result["project"] and window_info.app_name == "Slack":
+            channel = self._extract_slack_channel(window_info.window_title)
+            if channel:
+                slack_project = self._match_slack_channel(channel)
+                if slack_project:
+                    result["project"] = slack_project
+                    logger.debug(f"Slackチャンネルからプロジェクト推定: {slack_project} (channel={channel})")
 
-        # 3. サブフェーズ判定（実装 / 設計 / テスト 等）
-        sub_phase = self._match_sub_phase(search_text, window_info.app_name)
+        # 4. プロジェクトタイプ判定（カスタム開発 / プロダクト開発）
+        if not result["project"]:
+            project_type, cost_category = self._detect_project_type(search_text)
 
-        # URL サービスからサブフェーズを強化
-        if not sub_phase and url_service in url_service_overrides:
-            override = url_service_overrides[url_service]
-            if override not in STANDALONE_PHASES:
-                sub_phase = override
+            # GitHub URLからプロジェクトタイプを推定（より精度の高い判定）
+            if url_service == "GitHub" and url_context.get("details", {}).get("match_groups"):
+                groups = url_context["details"]["match_groups"]
+                if len(groups) >= 2:
+                    repo_name = groups[1]  # リポジトリ名
+                    # リポジトリ名でプロジェクトタイプを再判定
+                    repo_type, repo_cost = self._detect_project_type(repo_name)
+                    if repo_cost:
+                        project_type = repo_type
+                        cost_category = repo_cost
 
-        # 4. タスク分類 = プロジェクトタイプ + サブフェーズ
-        if sub_phase:
-            result["work_phase"] = f"{project_type}-{sub_phase}"
-        else:
-            result["work_phase"] = project_type
+            result["project"] = cost_category
 
-        # 5. 費用分類
-        result["project"] = cost_category
+            # 独立カテゴリでない場合のみ work_phase を設定
+            if not standalone:
+                # 5. サブフェーズ判定（実装 / 設計 / テスト 等）
+                sub_phase = self._match_sub_phase(search_text, window_info.app_name)
+
+                # URL サービスからサブフェーズを強化
+                if not sub_phase and url_service in url_service_overrides:
+                    override = url_service_overrides[url_service]
+                    if override not in STANDALONE_PHASES:
+                        sub_phase = override
+
+                # 6. タスク分類 = プロジェクトタイプ + サブフェーズ
+                if project_type:
+                    if sub_phase:
+                        result["work_phase"] = f"{project_type}-{sub_phase}"
+                    else:
+                        result["work_phase"] = project_type
+                elif sub_phase:
+                    result["work_phase"] = sub_phase
 
         logger.debug(
             f"分類結果: work_phase={result['work_phase']}, "
             f"project={result['project']}, category={result['category']}"
             f"{f', url_service={url_service}' if url_service else ''}"
+            f"{f', meeting={meeting_title}' if meeting_title else ''}"
         )
         return result
 
@@ -195,6 +246,8 @@ class ActivityClassifier:
     def _detect_project_type(self, text: str) -> tuple[str, str]:
         """プロジェクトタイプと費用分類を判定する
 
+        ★ v2: マッチしない場合はデフォルト fallback せず空を返す
+
         Returns:
             (project_type, cost_category)
         """
@@ -205,16 +258,66 @@ class ActivityClassifier:
                     cost = rule["cost_category"] or PROJECT_TYPE_COST_MAP.get(ptype, "")
                     return ptype, cost
 
-        # デフォルト
-        default = self.default_project_type
-        return default, PROJECT_TYPE_COST_MAP.get(default, "")
+        # ★ v2: デフォルト fallback なし（推定根拠がない場合は空）
+        return "", ""
 
     def _match_sub_phase(self, text: str, app_name: str) -> str:
-        """サブフェーズ（実装 / 設計 / テスト 等）を判定"""
-        for phase_name, patterns in self.sub_phase_rules.items():
-            for pattern in patterns:
-                if pattern.search(text):
-                    return phase_name
+        """サブフェーズ（実装 / 設計 / テスト 等）を判定
+
+        ★ v2: match_target 設定に応じてアプリ名のみ or 全テキストでマッチ
+        """
+        for rule in self.sub_phase_rules:
+            # match_target に応じてマッチ対象を選択
+            match_text = app_name if rule["match_target"] == "app_name" else text
+            for pattern in rule["patterns"]:
+                if pattern.search(match_text):
+                    return rule["name"]
+        return ""
+
+    def _extract_slack_channel(self, window_title: str) -> str:
+        """Slackのウィンドウタイトルからチャンネル名を抽出する
+
+        タイトル形式:
+        - "channel-name（チャンネル） - workspace - Slack"
+        - "channel-name（チャンネル） - workspace - N 個の新しいアイテム - Slack"
+        - "User Name（DM） - workspace - Slack"  → 空文字を返す（DMは推定不可）
+        - "スレッド - workspace - Slack"  → 空文字を返す
+        """
+        if not window_title:
+            return ""
+        # チャンネル名を抽出: "xxx（チャンネル）" パターン
+        match = re.match(r'^(.+?)（チャンネル）', window_title)
+        if match:
+            return match.group(1).strip()
+        return ""
+
+    def _match_slack_channel(self, channel: str) -> str:
+        """Slackチャンネル名からプロジェクトを推定する"""
+        channel_lower = channel.lower()
+        for rule in self.slack_channel_rules:
+            if channel_lower in rule["channels"]:
+                return rule["project"]
+        # チャンネル名でプロジェクトタイプ判定も試行
+        _, cost = self._detect_project_type(channel)
+        return cost
+
+    def _match_calendar_project(self, meeting_title: str) -> str:
+        """カレンダーイベントタイトルからプロジェクトを推定する
+
+        優先順:
+          1. プロジェクトタイプルール（impulse-pj-xxx 等 → 高精度）
+          2. カレンダー専用ルール（全社、定例 等 → 汎用）
+        """
+        # まずプロジェクトタイプ判定（高精度: impulse-pj-, impulse 等）
+        _, cost = self._detect_project_type(meeting_title)
+        if cost:
+            return cost
+
+        # 次にカレンダー専用ルール
+        for rule in self.calendar_project_rules:
+            for pattern in rule["patterns"]:
+                if pattern.search(meeting_title):
+                    return rule["project"]
         return ""
 
     def _get_app_category(self, app_name: str) -> str:

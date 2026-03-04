@@ -31,6 +31,7 @@ classification_rules:
       - test.*result
       - jest
       - cypress
+      match_target: search_text
     設計:
       keywords:
       - Figma
@@ -38,11 +39,13 @@ classification_rules:
       - Miro
       - draw\.io
       - whimsical
+      match_target: app_name
     要件定義:
       keywords:
       - 要件
       - requirement
       - PRD
+      match_target: search_text
     実装:
       keywords:
       - Visual Studio Code
@@ -54,6 +57,7 @@ classification_rules:
       - Cursor
       - PyCharm
       - WebStorm
+      match_target: app_name
   standalone_phases:
     meeting:
       keywords:
@@ -95,6 +99,22 @@ classification_rules:
       - zenn\.dev
       - medium\.com
       - dev\.to
+  # Slack チャンネル名 → プロジェクト推定ルール
+  slack_channel_rules:
+  - channels:
+    - general
+    - random
+    - times-
+    project: 全社活動
+  # カレンダーイベントタイトル → プロジェクト推定ルール
+  calendar_project_rules:
+  - keywords:
+    - 全社
+    - 全体会
+    - 朝会
+    - 定例
+    - 1on1
+    project: 全社活動
   cost_categories:
   - Impulse営業活動
   - Impulse技術調査・研究開発

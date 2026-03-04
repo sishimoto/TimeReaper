@@ -55,6 +55,7 @@ def cmd_monitor(args):
     from timereaper.monitor import ActiveWindowMonitor
     from timereaper.classifier import ActivityClassifier
     from timereaper.database import insert_activity
+    from timereaper.integrations.mac_calendar import get_current_meeting
 
     cfg = get_config()
     interval = cfg.get("monitor", {}).get("interval_seconds", 5)
@@ -91,7 +92,16 @@ def cmd_monitor(args):
                         last_ts = now  # アイドル期間を含めない
 
                     duration = min(now - last_ts, interval * 2) if last_ts > 0 else 0
-                    classification = classifier.classify(info)
+
+                    # カレンダー会議情報を取得
+                    current_meeting = get_current_meeting()
+                    meeting_title = current_meeting.get("title", "") if current_meeting else ""
+
+                    classification = classifier.classify(info, meeting_title=meeting_title)
+
+                    # 会議中は work_phase を meeting に上書き
+                    if current_meeting:
+                        classification["work_phase"] = "meeting"
 
                     # アクティブ時のみ記録
                     insert_activity(

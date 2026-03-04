@@ -165,11 +165,14 @@ class TimeReaperApp(rumps.App):
                         if self._last_timestamp > 0:
                             duration = min(now - self._last_timestamp, interval * 2)
 
-                        # アクティビティを分類
-                        classification = self.classifier.classify(window_info)
-
-                        # カレンダーに会議があれば work_phase を meeting に上書き
+                        # カレンダーに会議があれば会議情報を取得
                         current_meeting = get_current_meeting()
+                        meeting_title = current_meeting.get("title", "") if current_meeting else ""
+
+                        # アクティビティを分類（会議タイトルも渡す）
+                        classification = self.classifier.classify(window_info, meeting_title=meeting_title)
+
+                        # 会議中は work_phase を meeting に上書き
                         if current_meeting:
                             classification["work_phase"] = "meeting"
 
