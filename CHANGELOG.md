@@ -5,6 +5,24 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/ja/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/lang/ja/).
 
+## [0.7.0] - 2026-03-04
+
+### Changed
+- 分類エンジン v2: 誤分類の大幅改善
+  - デフォルト fallback 廃止: 推定根拠がない場合は project を空に（Finder/ChatGPT 等が「Impulse個別開発」になる問題を解消）
+  - sub_phase の match_target 導入: 「実装」判定をアプリ名のみで行い、Chrome 記事閲覧時の誤検出を防止
+  - standalone フェーズ（meeting/communication 等）でも project 推定を継続（早期 return 廃止）
+
+### Added
+- Slack チャンネル名からプロジェクト推定（slack_channel_rules）
+- カレンダーイベントタイトルからプロジェクト推定（calendar_project_rules）
+  - 会議タイトルに含まれるキーワードで費用分類を自動設定
+- カレンダーイベントの3種分類（meeting / work / other）
+  - meeting: 通常の会議 → work_phase="meeting" に上書き
+  - work: 開発・作業ブロック → ウィンドウベースの分類を優先
+  - other: 非作業イベント（お昼/不在/移動/私用等）→ project="その他"
+- classify() に meeting_title パラメータ追加（menubar/CLI 両対応）
+
 ## [0.5.0] - 2026-03-03
 
 ### Changed
