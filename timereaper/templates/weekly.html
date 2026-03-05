@@ -432,6 +432,64 @@
             .app-week-table { font-size: 11px; }
             .app-week-table th, .app-week-table td { padding: 4px 6px; }
         }
+
+        /* Download dropdown */
+        .download-dropdown {
+            position: relative;
+            display: inline-block;
+        }
+        .download-btn {
+            background: var(--bg-secondary);
+            border: 1px solid var(--border);
+            color: var(--text-primary);
+            padding: 6px 14px;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 14px;
+            transition: background 0.2s;
+        }
+        .download-btn:hover {
+            background: var(--bg-card);
+        }
+        .download-menu {
+            display: none;
+            position: absolute;
+            right: 0;
+            top: 100%;
+            margin-top: 4px;
+            background: var(--bg-card);
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            padding: 6px 0;
+            min-width: 200px;
+            z-index: 100;
+            box-shadow: 0 8px 24px rgba(0,0,0,0.4);
+        }
+        .download-menu.show {
+            display: block;
+        }
+        .download-menu a {
+            display: block;
+            padding: 8px 16px;
+            color: var(--text-primary);
+            text-decoration: none;
+            font-size: 13px;
+            transition: background 0.15s;
+        }
+        .download-menu a:hover {
+            background: var(--bg-secondary);
+        }
+        .download-menu .menu-label {
+            padding: 4px 16px 2px;
+            font-size: 11px;
+            color: var(--text-secondary);
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+        .download-menu .menu-divider {
+            border-top: 1px solid var(--border);
+            margin: 4px 0;
+        }
     </style>
 </head>
 <body>
@@ -442,6 +500,14 @@
                 <div class="nav-links">
                     <a href="/">← ダッシュボード</a>
                     <a href="/settings">⚙ 設定</a>
+                    <div class="download-dropdown">
+                        <button class="download-btn" onclick="toggleDownloadMenu(event)">⬇ DL</button>
+                        <div class="download-menu" id="downloadMenu">
+                            <div class="menu-label">📅 月次サマリー</div>
+                            <a href="#" onclick="downloadMonthly('md'); return false;">📝 Markdown (.md)</a>
+                            <a href="#" onclick="downloadMonthly('pdf'); return false;">📊 PDF</a>
+                        </div>
+                    </div>
                 </div>
             </div>
             <div class="week-nav">
@@ -576,6 +642,26 @@
         function goThisWeek() {
             baseDate = toDateStr(new Date());
             loadWeek(baseDate);
+        }
+
+        // --- Download ---
+        function toggleDownloadMenu(e) {
+            e.stopPropagation();
+            const menu = document.getElementById('downloadMenu');
+            menu.classList.toggle('show');
+        }
+
+        document.addEventListener('click', () => {
+            const menu = document.getElementById('downloadMenu');
+            if (menu) menu.classList.remove('show');
+        });
+
+        function downloadMonthly(format) {
+            document.getElementById('downloadMenu').classList.remove('show');
+            const d = new Date(baseDate);
+            const year = d.getFullYear();
+            const month = d.getMonth() + 1;
+            window.location.href = `/api/export/monthly/${year}/${month}?format=${format}`;
         }
 
         function toDateStr(d) {

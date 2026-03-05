@@ -19,6 +19,7 @@ from .database import (
     get_calendar_events,
     get_weekly_trend,
     get_weekly_report,
+    get_monthly_report,
     update_activity_tags,
     update_activity_tags_by_time,
     get_time_blocks,
@@ -261,6 +262,72 @@ def create_app():
             return jsonify({"ok": True, "message": f"Added '{value}' to {category}"})
         else:
             return jsonify({"ok": False, "message": f"'{value}' already exists in {category}"})
+
+    # --- エクスポート API ---
+    @app.route("/api/export/daily/<target_date>")
+    def api_export_daily(target_date):
+        """日次サマリーをエクスポートする（format=md|pdf）"""
+        from flask import Response
+        fmt = request.args.get("format", "md")
+
+        if fmt == "pdf":
+            from .exporter import export_daily_pdf
+            pdf_data = export_daily_pdf(target_date)
+            return Response(
+                pdf_data,
+                mimetype="application/pdf",
+                headers={
+                    "Content-Disposition": f"attachment; filename=timereaper-daily-{target_date}.pdf",
+                },
+            )
+        else:
+            from .exporter import export_daily_markdown
+            md_text = export_daily_markdown(target_date)
+            return Response(
+                md_text,
+                mimetype="text/markdown; charset=utf-8",
+                headers={
+                    "Content-Disposition": f"attachment; filename=timereaper-daily-{target_date}.md",
+                },
+            )
+
+    @app.route("/api/export/monthly/<int:year>/<int:month>")
+    def api_export_monthly(year, month):
+        """月次サマリーをエクスポートする（format=md|pdf）"""
+        from flask import Response
+        fmt = request.args.get("format", "md")
+
+        if month < 1 or month > 12:
+            return jsonify({"error": "month must be 1-12"}), 400
+
+        if fmt == "pdf":
+            from .exporter import export_monthly_pdf
+            pdf_data = export_monthly_pdf(year, month)
+            return Response(
+                pdf_data,
+                mimetype="application/pdf",
+                headers={
+                    "Content-Disposition": f"attachment; filename=timereaper-monthly-{year}-{month:02d}.pdf",
+                },
+            )
+        else:
+            from .exporter import export_monthly_markdown
+            md_text = export_monthly_markdown(year, month)
+            return Response(
+                md_text,
+                mimetype="text/markdown; charset=utf-8",
+                headers={
+                    "Content-Disposition": f"attachment; filename=timereaper-monthly-{year}-{month:02d}.md",
+                },
+            )
+
+    @app.route("/api/monthly-report/<int:year>/<int:month>")
+    def api_monthly_report(year, month):
+        """月次レポートデータを返す"""
+        if month < 1 or month > 12:
+            return jsonify({"error": "month must be 1-12"}), 400
+        report = get_monthly_report(year, month)
+        return jsonify(report)
 
     # --- アップデート API ---
     @app.route("/api/check-update")

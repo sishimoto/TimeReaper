@@ -442,6 +442,107 @@ def get_weekly_report(week_start: str) -> dict:
     }
 
 
+def get_monthly_report(year: int, month: int) -> dict:
+    """指定月の日別・カテゴリ別集計を返す
+
+    Args:
+        year: 年
+        month: 月 (1-12)
+
+    Returns:
+        { year, month, days: [{date, total_seconds, by_phase, by_project, top_apps}],
+          totals: {total_seconds, by_phase, by_project, by_app},
+          weekly_totals: [{week_start, total_seconds}] }
+    """
+    import calendar
+    _, last_day = calendar.monthrange(year, month)
+    start_date = f"{year:04d}-{month:02d}-01"
+    end_date = f"{year:04d}-{month:02d}-{last_day:02d}"
+
+    with get_connection() as conn:
+        rows = conn.execute(
+            """SELECT
+                date(timestamp) as day,
+                app_name,
+                work_phase,
+                project,
+                SUM(duration_seconds) as total_seconds,
+                COUNT(*) as record_count
+            FROM activity_log
+            WHERE date(timestamp) BETWEEN ? AND ?
+              AND is_idle = 0
+            GROUP BY day, app_name, work_phase, project
+            ORDER BY day ASC, total_seconds DESC""",
+            (start_date, end_date),
+        ).fetchall()
+
+    # 日ごとのデータを初期化
+    days: dict[str, dict[str, Any]] = {}
+    for d_num in range(1, last_day + 1):
+        d = f"{year:04d}-{month:02d}-{d_num:02d}"
+        days[d] = {
+            "date": d,
+            "total_seconds": 0,
+            "by_phase": {},
+            "by_project": {},
+            "apps": {},
+        }
+
+    totals: dict[str, Any] = {
+        "total_seconds": 0,
+        "by_phase": {},
+        "by_project": {},
+        "by_app": {},
+    }
+
+    for row in rows:
+        r = dict(row)
+        d = r["day"]
+        sec = r["total_seconds"] or 0
+        wp = r["work_phase"] or "(未分類)"
+        pj = r["project"] or "(未分類)"
+        app = r["app_name"] or ""
+
+        if d in days:
+            days[d]["total_seconds"] += sec
+            days[d]["by_phase"][wp] = days[d]["by_phase"].get(wp, 0) + sec
+            days[d]["by_project"][pj] = days[d]["by_project"].get(pj, 0) + sec
+            days[d]["apps"][app] = days[d]["apps"].get(app, 0) + sec
+
+        totals["total_seconds"] += sec
+        totals["by_phase"][wp] = totals["by_phase"].get(wp, 0) + sec
+        totals["by_project"][pj] = totals["by_project"].get(pj, 0) + sec
+        totals["by_app"][app] = totals["by_app"].get(app, 0) + sec
+
+    # アプリを top5 に変換、週ごとの集計
+    day_list = []
+    weekly_totals: dict[str, float] = {}
+    for d in sorted(days.keys()):
+        info = days[d]
+        sorted_apps = sorted(info["apps"].items(), key=lambda x: -x[1])
+        info["top_apps"] = [{"app": a, "seconds": s} for a, s in sorted_apps[:5]]
+        del info["apps"]
+        day_list.append(info)
+
+        # 週番号で集計
+        d_dt = date.fromisoformat(d)
+        week_start = (d_dt - timedelta(days=d_dt.weekday())).isoformat()
+        weekly_totals[week_start] = weekly_totals.get(week_start, 0) + info["total_seconds"]
+
+    return {
+        "year": year,
+        "month": month,
+        "month_start": start_date,
+        "month_end": end_date,
+        "days": day_list,
+        "totals": totals,
+        "weekly_totals": [
+            {"week_start": ws, "total_seconds": sec}
+            for ws, sec in sorted(weekly_totals.items())
+        ],
+    }
+
+
 def update_activity_tags(
     start_time: str,
     end_time: str,
