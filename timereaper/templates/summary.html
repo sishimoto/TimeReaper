@@ -683,13 +683,46 @@
             border-top: 1px solid var(--border);
             margin: 4px 0;
         }
+        .version-badge {
+            cursor: pointer; transition: all 0.2s; user-select: none;
+        }
+        .version-badge:hover { border-color: var(--accent-blue); color: var(--accent-blue); }
+        .version-badge.checking { opacity: 0.5; pointer-events: none; }
+        .update-toast {
+            display: none; align-items: center; gap: 8px;
+            background: var(--bg-secondary); border: 1px solid var(--border);
+            border-radius: 8px; padding: 8px 14px; margin-bottom: 12px;
+            font-size: 13px; animation: slideDown 0.3s ease;
+        }
+        .update-toast.visible { display: flex; }
+        .update-toast .update-text { flex: 1; color: var(--text-secondary); }
+        .update-toast .update-text strong { color: var(--accent-green); }
+        .update-toast .update-btn {
+            padding: 4px 12px; border-radius: 5px; border: none;
+            cursor: pointer; font-size: 12px; transition: opacity 0.2s;
+        }
+        .update-toast .update-btn:hover { opacity: 0.85; }
+        .update-btn-primary { background: var(--accent-green); color: #0d1117; font-weight: 600; }
+        .update-btn-secondary {
+            background: transparent; border: 1px solid var(--border) !important;
+            color: var(--text-secondary); font-size: 12px; text-decoration: none;
+        }
+        .update-btn-close {
+            background: transparent; border: none; color: var(--text-secondary);
+            cursor: pointer; font-size: 16px; padding: 0 2px; line-height: 1;
+        }
+        .update-toast.latest { border-color: var(--accent-blue); }
+        @keyframes slideDown {
+            from { opacity: 0; transform: translateY(-8px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
     </style>
 </head>
 <body>
     <div class="container">
         <header>
             <div class="header-top">
-                <h1><img src="/static/icon-128.png" alt="" class="app-icon">日次サマリー <span id="versionBadge" style="font-size: 11px; font-weight: 400; background: var(--bg-secondary); border: 1px solid var(--border); color: var(--text-secondary); padding: 2px 8px; border-radius: 10px; vertical-align: middle; margin-left: 6px;"></span></h1>
+                <h1><img src="/static/icon-128.png" alt="" class="app-icon">日次サマリー <span id="versionBadge" class="version-badge" onclick="manualCheckForUpdates()" title="クリックでアップデートを確認" style="font-size: 11px; font-weight: 400; background: var(--bg-secondary); border: 1px solid var(--border); color: var(--text-secondary); padding: 2px 8px; border-radius: 10px; vertical-align: middle; margin-left: 6px;"></span></h1>
                 <div class="nav-links">
                     <a href="/">← ダッシュボード</a>
                     <a href="/weekly">📊 週次</a>
@@ -715,6 +748,9 @@
                 <button onclick="goToday()">今日</button>
             </div>
         </header>
+
+        <!-- Update Toast -->
+        <div class="update-toast" id="updateToast"></div>
 
         <!-- Stats -->
         <div class="stats-row">
@@ -1500,10 +1536,100 @@
             btn.disabled = false;
         }
 
+        // --- アップデートチェック ---
+        let _updateDownloadUrl = '';
+        let _currentVersion = '';
+
+        function showUpdateToast(html, cls) {
+            const el = document.getElementById('updateToast');
+            el.innerHTML = html;
+            el.className = 'update-toast visible' + (cls ? ' ' + cls : '');
+        }
+
+        function dismissUpdate() {
+            const el = document.getElementById('updateToast');
+            el.classList.remove('visible');
+            sessionStorage.setItem('updateDismissed', '1');
+        }
+
+        async function checkForUpdates(manual) {
+            const badge = document.getElementById('versionBadge');
+            if (manual) badge.classList.add('checking');
+            try {
+                const res = await fetch('/api/check-update');
+                if (!res.ok) {
+                    if (manual) showUpdateToast('⚠️ <span class="update-text">確認に失敗しました</span><button class="update-btn-close" onclick="dismissUpdate()">&times;</button>');
+                    return;
+                }
+                const data = await res.json();
+                if (data.is_update_available) {
+                    _updateDownloadUrl = data.download_url || '';
+                    const releaseUrl = data.release_url || '#';
+                    showUpdateToast(
+                        '<span class="update-text">🆙 <strong>v' + data.latest_version + '</strong> が利用可能</span>' +
+                        '<button class="update-btn update-btn-primary" onclick="performUpdate()">更新</button>' +
+                        '<a href="' + releaseUrl + '" target="_blank" class="update-btn update-btn-secondary">詳細</a>' +
+                        '<button class="update-btn-close" onclick="dismissUpdate()">&times;</button>'
+                    );
+                    badge.style.borderColor = 'var(--accent-green)';
+                    badge.style.color = 'var(--accent-green)';
+                } else if (manual) {
+                    showUpdateToast(
+                        '<span class="update-text">✅ 最新バージョンです（v' + _currentVersion + '）</span>' +
+                        '<button class="update-btn-close" onclick="dismissUpdate()">&times;</button>',
+                        'latest'
+                    );
+                    setTimeout(dismissUpdate, 4000);
+                }
+            } catch (e) {
+                if (manual) showUpdateToast('⚠️ <span class="update-text">ネットワークエラー</span><button class="update-btn-close" onclick="dismissUpdate()">&times;</button>');
+            } finally {
+                badge.classList.remove('checking');
+            }
+        }
+
+        function manualCheckForUpdates() {
+            sessionStorage.removeItem('updateDismissed');
+            checkForUpdates(true);
+        }
+
+        async function performUpdate() {
+            const toast = document.getElementById('updateToast');
+            toast.innerHTML = '<span class="update-text">⏳ ダウンロード中...</span>';
+            try {
+                const res = await fetch('/api/update', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ download_url: _updateDownloadUrl }),
+                });
+                const data = await res.json();
+                if (data.success) {
+                    const restartMsg = data.restart ? '再起動します...' : '再起動してください';
+                    showUpdateToast('<span class="update-text">✅ <strong>' + data.message + '</strong> — ' + restartMsg + '</span>');
+                } else {
+                    showUpdateToast(
+                        '<span class="update-text">❌ ' + data.message + '</span>' +
+                        '<button class="update-btn-close" onclick="dismissUpdate()">&times;</button>'
+                    );
+                }
+            } catch (e) {
+                showUpdateToast(
+                    '<span class="update-text">❌ 通信エラー: ' + e.message + '</span>' +
+                    '<button class="update-btn-close" onclick="dismissUpdate()">&times;</button>'
+                );
+            }
+        }
+
         // バージョン表示
         fetch('/api/version').then(r => r.json()).then(d => {
+            _currentVersion = d.version;
             document.getElementById('versionBadge').textContent = 'v' + d.version;
         }).catch(() => {});
+
+        // ページ読み込み後にアップデートチェック
+        if (!sessionStorage.getItem('updateDismissed')) {
+            setTimeout(() => checkForUpdates(false), 3000);
+        }
     </script>
 </body>
 </html>

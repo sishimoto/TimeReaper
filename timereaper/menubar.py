@@ -56,6 +56,7 @@ class TimeReaperApp(rumps.App):
             rumps.MenuItem("今日の作業時間", callback=None),
             None,
             rumps.MenuItem(f"v{__version__}", callback=None),
+            rumps.MenuItem("🔄 アップデートを確認", callback=self._manual_check_for_updates),
             rumps.MenuItem("終了", callback=self.quit_app),
         ]
 
@@ -364,6 +365,40 @@ class TimeReaperApp(rumps.App):
             check_for_updates_async(_on_update)
         except Exception as e:
             logger.warning(f"アップデートチェックをスキップ: {e}")
+
+    def _manual_check_for_updates(self, _):
+        """手動でアップデートを確認する（メニューから呼び出し）"""
+        def _on_update(info):
+            if info and info.is_update_available:
+                logger.info(f"新バージョン v{info.latest_version} が利用可能です")
+                rumps.notification(
+                    title="TimeReaper アップデート",
+                    subtitle=f"v{info.latest_version} が利用可能です",
+                    message="ダッシュボードからアップデートできます。",
+                )
+            elif info:
+                rumps.notification(
+                    title="TimeReaper",
+                    subtitle="最新バージョンです",
+                    message=f"v{__version__} は最新です。",
+                )
+            else:
+                rumps.notification(
+                    title="TimeReaper",
+                    subtitle="確認に失敗しました",
+                    message="ネットワーク接続を確認してください。",
+                )
+
+        try:
+            from .updater import check_for_updates_async
+            check_for_updates_async(_on_update)
+        except Exception as e:
+            logger.warning(f"アップデートチェックをスキップ: {e}")
+            rumps.notification(
+                title="TimeReaper",
+                subtitle="確認に失敗しました",
+                message=str(e),
+            )
 
 
 def run_menubar_app():
