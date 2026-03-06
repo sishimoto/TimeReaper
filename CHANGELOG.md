@@ -5,6 +5,20 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/ja/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/lang/ja/).
 
+## [0.8.1] - 2026-03-06
+
+### Added
+- 全ページ（ダッシュボード・日次サマリー・週次レポート）にアップデートチェック機能を追加
+  - バージョンバッジクリックで手動チェック、ページ読み込み時に自動チェック
+- メニューバーに「🔄 アップデートを確認」メニュー項目を追加
+  - 更新あり・最新・エラーの3パターンで macOS 通知表示
+- 設定ページに macOS 権限ステータスセクションを追加
+  - アクセシビリティ・オートメーション・画面収録・通知の許可状態を検出・表示
+  - 未許可時はシステム設定のパスを案内
+
+### Fixed
+- アップデーターの pip シンボリンク問題を修正（`python -m pip` に変更）
+
 ## [0.8.0] - 2026-03-06
 
 ### Added
