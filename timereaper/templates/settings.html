@@ -766,13 +766,18 @@
                     html += '<div style="flex: 1;">';
                     html += '<div style="font-size: 14px; font-weight: 500; color: var(--text-primary);">' + p.name + '</div>';
                     html += '<div style="font-size: 12px; color: var(--text-secondary); margin-top: 2px;">' + p.description + '</div>';
-                    if (p.granted === false) {
+                    if (p.can_request) {
+                        html += '<div style="font-size: 11px; color: var(--accent-orange); margin-top: 4px;">🔔 通知許可がまだリクエストされていません</div>';
+                    } else if (p.granted === false) {
                         html += '<div style="font-size: 11px; color: var(--accent-orange); margin-top: 4px;">📂 ' + p.setting_path + '</div>';
                     } else if (p.granted === null) {
                         html += '<div style="font-size: 11px; color: var(--text-secondary); margin-top: 4px;">⚠️ 自動確認不可 — ' + p.setting_path + ' で確認してください</div>';
                     }
                     html += '</div>';
-                    html += '<div style="text-align: right; min-width: 80px;">';
+                    html += '<div style="text-align: right; min-width: 80px; display: flex; align-items: center; gap: 8px;">';
+                    if (p.can_request) {
+                        html += '<button onclick="requestNotificationPermission(this)" style="background: var(--accent-blue); color: #fff; border: none; padding: 5px 12px; border-radius: 6px; cursor: pointer; font-size: 12px; white-space: nowrap; transition: opacity 0.2s;" onmouseover="this.style.opacity=\'0.8\'" onmouseout="this.style.opacity=\'1\'">🔔 許可する</button>';
+                    }
                     html += '<span style="font-size: 14px;">' + statusIcon + '</span> ';
                     html += '<span style="font-size: 12px; color: ' + statusColor + ';">' + statusText + '</span>';
                     html += '</div></div>';
@@ -781,6 +786,30 @@
                 body.innerHTML = html;
             } catch(e) {
                 body.innerHTML = '<div style="text-align: center; padding: 20px; color: var(--accent-red);">権限情報の取得に失敗しました</div>';
+            }
+        }
+
+        async function requestNotificationPermission(btn) {
+            btn.disabled = true;
+            btn.textContent = '⏳ リクエスト中...';
+            try {
+                const res = await fetch('/api/request-notification-permission', { method: 'POST' });
+                const data = await res.json();
+                if (data.success && data.granted) {
+                    btn.textContent = '✅ 許可されました';
+                    btn.style.background = 'var(--accent-green)';
+                    setTimeout(() => loadPermissions(), 1000);
+                } else if (data.success && !data.granted) {
+                    btn.textContent = '❌ 拒否されました';
+                    btn.style.background = 'var(--accent-red)';
+                    setTimeout(() => loadPermissions(), 1000);
+                } else {
+                    btn.textContent = '⚠️ エラー';
+                    btn.style.background = 'var(--accent-orange)';
+                }
+            } catch(e) {
+                btn.textContent = '⚠️ エラー';
+                btn.style.background = 'var(--accent-orange)';
             }
         }
 

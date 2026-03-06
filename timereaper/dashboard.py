@@ -611,47 +611,148 @@ def create_app():
             })
 
         # 4. 通知
-        # rumps は NSUserNotificationCenter（旧API）を使用しており、
-        # UNUserNotificationCenter（新API）が利用できないため
-        # プログラムからの正確な権限確認ができない
+        # UserNotifications フレームワークを明示ロード＋ブロック署名登録で
+        # UNUserNotificationCenter の権限状態を正確に取得
         notification_granted = None
+        notification_can_request = False
         try:
             import threading as _threading
             import objc
-            try:
-                UNUserNotificationCenter = objc.lookUpClass("UNUserNotificationCenter")
-                center = UNUserNotificationCenter.currentNotificationCenter()
-                _event = _threading.Event()
-                _result = [None]
 
-                def _on_settings(settings):
-                    try:
-                        auth_status = settings.authorizationStatus()
-                        _result[0] = auth_status in (2, 3)
-                    except Exception:
-                        pass
-                    _event.set()
+            # UserNotifications フレームワークを明示的にロード
+            objc.loadBundle(
+                'UserNotifications',
+                bundle_path='/System/Library/Frameworks/UserNotifications.framework',
+                module_globals={},
+            )
 
-                center.getNotificationSettingsWithCompletionHandler_(_on_settings)
-                from CoreFoundation import CFRunLoopRunInMode, kCFRunLoopDefaultMode
-                import time as _time
-                _start = _time.monotonic()
-                while not _event.is_set() and (_time.monotonic() - _start) < 2.0:
-                    CFRunLoopRunInMode(kCFRunLoopDefaultMode, 0.1, False)
-                notification_granted = _result[0]
-            except objc.error:
-                # UNUserNotificationCenter が存在しない環境
-                pass
+            # getNotificationSettingsWithCompletionHandler: のブロック署名を登録
+            objc.registerMetaDataForSelector(
+                b'UNUserNotificationCenter',
+                b'getNotificationSettingsWithCompletionHandler:',
+                {
+                    'arguments': {
+                        2: {
+                            'callable': {
+                                'retval': {'type': b'v'},
+                                'arguments': {
+                                    0: {'type': b'^v'},
+                                    1: {'type': b'@'},
+                                },
+                            }
+                        }
+                    }
+                },
+            )
+
+            UNUserNotificationCenter = objc.lookUpClass("UNUserNotificationCenter")
+            center = UNUserNotificationCenter.currentNotificationCenter()
+            _event = _threading.Event()
+            _result = [None]  # authorizationStatus の生値
+
+            def _on_settings(settings):
+                try:
+                    _result[0] = settings.authorizationStatus()
+                except Exception:
+                    pass
+                _event.set()
+
+            center.getNotificationSettingsWithCompletionHandler_(_on_settings)
+            from CoreFoundation import CFRunLoopRunInMode, kCFRunLoopDefaultMode
+            import time as _time
+            _start = _time.monotonic()
+            while not _event.is_set() and (_time.monotonic() - _start) < 3.0:
+                CFRunLoopRunInMode(kCFRunLoopDefaultMode, 0.1, False)
+
+            auth_status = _result[0]
+            if auth_status is not None:
+                # 0=notDetermined, 1=denied, 2=authorized, 3=provisional
+                if auth_status in (2, 3):
+                    notification_granted = True
+                elif auth_status == 1:
+                    notification_granted = False
+                else:
+                    # notDetermined: まだリクエストされていない
+                    notification_granted = False
+                    notification_can_request = True
         except Exception:
             pass
-        permissions.append({
+        perm_entry = {
             "name": "通知",
             "description": "アップデート通知やポモドーロ通知に使用します",
             "granted": notification_granted,
             "setting_path": "システム設定 → 通知 → TimeReaper",
-        })
+        }
+        if notification_can_request:
+            perm_entry["can_request"] = True
+        permissions.append(perm_entry)
 
         return jsonify({"permissions": permissions})
+
+    @app.route("/api/request-notification-permission", methods=["POST"])
+    def request_notification_permission():
+        """通知許可をリクエストする（macOS の許可ダイアログを表示）"""
+        try:
+            import threading as _threading
+            import objc
+
+            objc.loadBundle(
+                'UserNotifications',
+                bundle_path='/System/Library/Frameworks/UserNotifications.framework',
+                module_globals={},
+            )
+
+            # requestAuthorizationWithOptions:completionHandler: のブロック署名を登録
+            objc.registerMetaDataForSelector(
+                b'UNUserNotificationCenter',
+                b'requestAuthorizationWithOptions:completionHandler:',
+                {
+                    'arguments': {
+                        3: {
+                            'callable': {
+                                'retval': {'type': b'v'},
+                                'arguments': {
+                                    0: {'type': b'^v'},
+                                    1: {'type': b'Z'},  # BOOL granted
+                                    2: {'type': b'@'},  # NSError
+                                },
+                            }
+                        }
+                    }
+                },
+            )
+
+            UNUserNotificationCenter = objc.lookUpClass("UNUserNotificationCenter")
+            center = UNUserNotificationCenter.currentNotificationCenter()
+            _event = _threading.Event()
+            _result = {"granted": None, "error": None}
+
+            def _on_request(granted, error):
+                _result["granted"] = bool(granted)
+                if error:
+                    _result["error"] = str(error)
+                _event.set()
+
+            # UNAuthorizationOptionAlert | UNAuthorizationOptionSound | UNAuthorizationOptionBadge
+            options = (1 << 0) | (1 << 1) | (1 << 2)
+            center.requestAuthorizationWithOptions_completionHandler_(options, _on_request)
+
+            from CoreFoundation import CFRunLoopRunInMode, kCFRunLoopDefaultMode
+            import time as _time
+            _start = _time.monotonic()
+            while not _event.is_set() and (_time.monotonic() - _start) < 30.0:
+                CFRunLoopRunInMode(kCFRunLoopDefaultMode, 0.1, False)
+
+            if _result["granted"] is not None:
+                return jsonify({
+                    "success": True,
+                    "granted": _result["granted"],
+                    "error": _result["error"],
+                })
+            else:
+                return jsonify({"success": False, "error": "タイムアウト"}), 500
+        except Exception as e:
+            return jsonify({"success": False, "error": str(e)}), 500
 
     return app
 
