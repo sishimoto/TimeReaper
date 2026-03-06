@@ -5,6 +5,20 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/ja/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/lang/ja/).
 
+## [0.8.0] - 2026-03-06
+
+### Added
+- 日次・月次サマリーのエクスポート機能（Markdown / PDF）
+  - PDF: 統計カード、横棒グラフ、割合カラーバー、時間帯別チャート、日別推移チャートを視覚的に出力
+  - Markdown: Unicode ブロック文字による視覚バー付きテーブル
+  - サマリーページ・週次ページに「📥 エクスポート」ドロップダウンを追加
+- `get_monthly_report()` API: 月次集計データの取得
+- pytest / mypy によるテスト・型チェック基盤
+- ログレベルの config.yaml 設定対応
+
+### Fixed
+- PDF の日本語フォント表示不具合を修正（CID フォント HeiseiKakuGo-W5 に変更）
+
 ## [0.7.0] - 2026-03-04
 
 ### Changed
