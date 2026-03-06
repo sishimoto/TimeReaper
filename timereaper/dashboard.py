@@ -523,14 +523,35 @@ def create_app():
             from ApplicationServices import AXIsProcessTrusted
             accessibility_granted = AXIsProcessTrusted()
         except ImportError:
-            # pyobjc がない場合は AppleScript で簡易テスト
+            pass
+
+        # AXIsProcessTrusted() は再ビルド後に誤って False を返すことがあるため
+        # 実際に Accessibility API を使った機能テストでフォールバック
+        if not accessibility_granted:
+            try:
+                from ApplicationServices import (
+                    AXUIElementCreateSystemWide,
+                    AXUIElementCopyAttributeValue,
+                )
+                system_wide = AXUIElementCreateSystemWide()
+                err, _ = AXUIElementCopyAttributeValue(
+                    system_wide, "AXFocusedApplication", None
+                )
+                if err == 0:
+                    accessibility_granted = True
+            except Exception:
+                pass
+
+        # さらに AppleScript での簡易テストもフォールバック
+        if not accessibility_granted:
             try:
                 r = subprocess.run(
                     ["osascript", "-e",
                      'tell application "System Events" to get name of first application process whose frontmost is true'],
                     capture_output=True, timeout=5,
                 )
-                accessibility_granted = r.returncode == 0
+                if r.returncode == 0:
+                    accessibility_granted = True
             except Exception:
                 pass
         permissions.append({
@@ -566,8 +587,22 @@ def create_app():
                 from Quartz import CGPreflightScreenCaptureAccess
                 screen_recording_granted = CGPreflightScreenCaptureAccess()
             except (ImportError, AttributeError):
-                # API unavailable — cannot determine
                 screen_recording_granted = None
+
+            # CGPreflightScreenCaptureAccess が False でも
+            # 実際にウィンドウタイトルを取得できるか機能テスト
+            if not screen_recording_granted:
+                try:
+                    r = subprocess.run(
+                        ["osascript", "-e",
+                         'tell application "System Events" to get name of front window of first application process whose frontmost is true'],
+                        capture_output=True, text=True, timeout=5,
+                    )
+                    if r.returncode == 0 and r.stdout.strip():
+                        screen_recording_granted = True
+                except Exception:
+                    pass
+
             permissions.append({
                 "name": "画面収録",
                 "description": "macOS 14 以降でウィンドウタイトルの取得に必要です",
