@@ -104,17 +104,20 @@ if ! $SKIP_BUILD; then
     echo "🔍 前提条件チェック..."
 
     # Python チェック
-    if [ ! -f "venv/bin/python" ]; then
+    if [ ! -f "venv/bin/python3" ] && [ ! -f "venv/bin/python" ]; then
         log_error "venv が見つかりません。先に setup.sh を実行してください。"
         exit 1
     fi
+    # pyenv 環境で venv の python が正しく解決されるよう、明示的にパスを設定
+    export PATH="$PROJECT_DIR/venv/bin:$PATH"
+    hash -r 2>/dev/null || true
     source venv/bin/activate
-    log_info "Python: $(python --version)"
+    log_info "Python: $(python3 --version)"
 
     # py2app チェック
-    if ! python -c "import py2app" 2>/dev/null; then
+    if ! python3 -c "import py2app" 2>/dev/null; then
         echo "📦 py2app をインストール中..."
-        pip install py2app
+        pip3 install py2app
     fi
     log_info "py2app: インストール済み"
 
@@ -146,7 +149,7 @@ if ! $SKIP_BUILD; then
     # ビルド実行
     echo ""
     echo "🔨 .app バンドルをビルド中..."
-    python setup.py py2app 2>&1 | tail -5
+    python3 setup.py py2app 2>&1 | tail -5
 
     if [ ! -d "dist/TimeReaper.app" ]; then
         log_error "ビルドに失敗しました"
@@ -172,6 +175,30 @@ if ! $SKIP_BUILD; then
         log_warn "config.yaml が .app に含まれていません。手動でコピーします..."
         cp config.yaml "dist/TimeReaper.app/Contents/Resources/config.yaml"
         log_info "config.yaml をコピーしました"
+    fi
+
+    # アドホックコード署名 & quarantine 属性除去（全リソース同梱後に実行）
+    echo ""
+    echo "🔏 コード署名中..."
+    xattr -cr dist/TimeReaper.app
+    # サブコンポーネント（dylib, so）を先に署名
+    find dist/TimeReaper.app -name "*.dylib" -o -name "*.so" | while read f; do
+        codesign --force --sign - --no-strict "$f" 2>/dev/null
+    done
+    # Python.framework を署名
+    if [ -d "dist/TimeReaper.app/Contents/Frameworks/Python.framework" ]; then
+        codesign --force --sign - --no-strict dist/TimeReaper.app/Contents/Frameworks/Python.framework 2>/dev/null
+    fi
+    # CalHelper.app を署名
+    if [ -d "dist/TimeReaper.app/Contents/Resources/CalHelper.app" ]; then
+        codesign --force --deep --sign - --no-strict dist/TimeReaper.app/Contents/Resources/CalHelper.app 2>/dev/null
+    fi
+    # アプリ全体を署名
+    codesign --force --deep --sign - --no-strict dist/TimeReaper.app
+    if codesign -v dist/TimeReaper.app 2>/dev/null; then
+        log_info "アドホック署名: OK"
+    else
+        log_warn "アドホック署名に失敗しました（配布時に問題が発生する可能性があります）"
     fi
 
 fi  # SKIP_BUILD
@@ -347,6 +374,7 @@ if $DO_INSTALL; then
     # 既存アプリを削除してコピー
     rm -rf /Applications/TimeReaper.app
     cp -R dist/TimeReaper.app /Applications/
+    xattr -cr /Applications/TimeReaper.app
     log_info "/Applications/TimeReaper.app にインストールしました"
 
     echo ""

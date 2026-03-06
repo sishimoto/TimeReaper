@@ -372,6 +372,13 @@ def perform_dmg_update(download_url: str) -> dict:
                 f.write(chunk)
         logger.info(f"DMG ダウンロード完了: {os.path.getsize(dmg_path)} bytes")
 
+        # 1.5. quarantine 属性を除去（Gatekeeper ブロック防止）
+        subprocess.run(
+            ["xattr", "-cr", dmg_path],
+            capture_output=True, timeout=10,
+        )
+        logger.debug("DMG の quarantine 属性を除去")
+
         # 2. DMG マウント
         mount_point = os.path.join(tmpdir, "dmg_mount")
         os.makedirs(mount_point, exist_ok=True)
@@ -411,6 +418,21 @@ def perform_dmg_update(download_url: str) -> dict:
 
         logger.info(f"コピー: {app_src} → {app_dest}")
         shutil.copytree(app_src, app_dest)
+
+        # 4.5. quarantine 属性を除去 & アドホック署名
+        subprocess.run(
+            ["xattr", "-cr", app_dest],
+            capture_output=True, timeout=10,
+        )
+        logger.debug("インストール先 .app の quarantine 属性を除去")
+        sign_result = subprocess.run(
+            ["codesign", "--force", "--deep", "--sign", "-", app_dest],
+            capture_output=True, text=True, timeout=30,
+        )
+        if sign_result.returncode == 0:
+            logger.info("アドホック署名を適用")
+        else:
+            logger.warning(f"アドホック署名に失敗: {sign_result.stderr}")
 
         # 5. アンマウント
         _detach_dmg(mount_point)
