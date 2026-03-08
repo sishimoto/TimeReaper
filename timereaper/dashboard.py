@@ -59,29 +59,31 @@ def _get_pomodoro_timer():
     return _pomodoro_timer
 
 
-    def _notify_settings_changed(settings):
-        if _settings_change_callback:
-            try:
-                _settings_change_callback(settings)
-            except Exception as e:
-                import logging
-                logging.getLogger(__name__).error(f"設定変更通知エラー: {e}")
-
-    def _get_maintenance_prompt() -> Optional[dict]:
-        if not _maintenance_prompt_getter:
-            return None
+def _notify_settings_changed(settings):
+    if _settings_change_callback:
         try:
-            return _maintenance_prompt_getter()
-        except Exception:
-            return None
-
-    def _decide_maintenance_prompt(prompt_id: str, decision: str) -> dict:
-        if not _maintenance_prompt_decider:
-            return {"ok": False, "reason": "handler_not_registered"}
-        try:
-            return _maintenance_prompt_decider(prompt_id, decision)
+            _settings_change_callback(settings)
         except Exception as e:
-            return {"ok": False, "reason": f"handler_error:{e}"}
+            import logging
+            logging.getLogger(__name__).error(f"設定変更通知エラー: {e}")
+
+
+def _get_maintenance_prompt() -> Optional[dict]:
+    if not _maintenance_prompt_getter:
+        return None
+    try:
+        return _maintenance_prompt_getter()
+    except Exception:
+        return None
+
+
+def _decide_maintenance_prompt(prompt_id: str, decision: str) -> dict:
+    if not _maintenance_prompt_decider:
+        return {"ok": False, "reason": "handler_not_registered"}
+    try:
+        return _maintenance_prompt_decider(prompt_id, decision)
+    except Exception as e:
+        return {"ok": False, "reason": f"handler_error:{e}"}
 
 
 def create_app():
